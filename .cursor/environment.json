@@ -5,8 +5,8 @@
   "terminals": [
     {
       "name": "bot",
-      "command": "if [ -n \"$DISCORD_TOKEN\" ]; then npm start; else echo 'DISCORD_TOKEN not set. Add DISCORD_TOKEN + CLIENT_ID as secrets (or in .env) and run: npm start'; fi",
-      "description": "Runs the TitanBot process (npm start). Requires DISCORD_TOKEN + CLIENT_ID to connect to Discord; serves the health API on port 3000."
+      "command": "bash .cursor/start.sh; if [ -n \"$DISCORD_TOKEN\" ]; then npm start; else echo 'DISCORD_TOKEN not set. Add DISCORD_TOKEN + CLIENT_ID as secrets (or in .env) and run: npm start'; fi",
+      "description": "Ensures PostgreSQL is up (via .cursor/start.sh), then runs the TitanBot process (npm start). Requires DISCORD_TOKEN + CLIENT_ID to connect to Discord; serves the health API on port 3000."
     }
   ],
   "ports": [
