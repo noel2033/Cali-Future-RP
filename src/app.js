@@ -6,7 +6,6 @@ import cron from 'node-cron';
 
 import config from './config/application.js';
 import { initializeDatabase } from './utils/database.js';
-import { getGuildConfig } from './services/config/guildConfig.js';
 import { getServerCounters, saveServerCounters, updateCounter } from './services/serverstatsService.js';
 import { logger, startupLog, shutdownLog } from './utils/logger.js';
 import { checkBirthdays } from './services/birthdayService.js';
@@ -33,7 +32,7 @@ class TitanBot extends Client {
 
         GatewayIntentBits.GuildVoiceStates,             
 
-        GatewayIntentBits.GuildBans,                    
+        GatewayIntentBits.GuildModeration,
       ],
     });
 
@@ -91,8 +90,12 @@ class TitanBot extends Client {
       startupLog('Discord login successful');
       
       startupLog('Registering slash commands globally...');
-      await this.registerCommands();
-      startupLog('Slash commands registration complete');
+      const commandsRegistered = await this.registerCommands();
+      if (commandsRegistered) {
+        startupLog('Slash commands registration complete');
+      } else {
+        logger.error('Slash command registration failed; the bot will stay online with previously registered commands');
+      }
       
       const databaseMode = dbStatus.isDegraded
         ? 'Optional in-memory mode (data resets after restart)'
@@ -278,8 +281,6 @@ class TitanBot extends Client {
           }
         }
         
-        // Save cleaned counters if any were orphaned
-        // Save cleaned counters if any were orphaned
         if (orphanedCounters.length > 0) {
           await saveServerCounters(this, guildId, validCounters);
           logger.info(`Cleaned up ${orphanedCounters.length} orphaned counter(s) from guild ${guildId} during scheduled update`);
@@ -325,8 +326,10 @@ class TitanBot extends Client {
   async registerCommands() {
     try {
       await registerSlashCommands(this, { clientId: this.config.bot.clientId });
+      return true;
     } catch (error) {
       logger.error('Error registering commands:', error);
+      return false;
     }
   }
 
@@ -352,8 +355,6 @@ class TitanBot extends Client {
         logger.info('✅ Web server closed');
       }
 
-      // Close database connection
-      // Close database connection
       if (this.db && this.db.db) {
         logger.info('Closing database connection...');
         try {

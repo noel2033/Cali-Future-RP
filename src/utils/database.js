@@ -62,7 +62,6 @@ export {
 
 import { db, getFromDb, setInDb } from './database/wrapper.js';
 import {
-    getGuildConfigKey,
     getGuildBirthdaysKey,
     getLevelingKey,
     getUserLevelKey,
@@ -71,12 +70,10 @@ import {
     getUserApplicationsKey,
     getApplicationKey,
     getJoinToCreateConfigKey,
-    getJoinToCreateChannelsKey,
     getWelcomeConfigKey,
-    getEconomyKey,
-    getAFKKey,
     getUserLevelPrefix,
 } from './database/keys.js';
+import { toEpochMs } from './database/timestamps.js';
 
 export async function insertVerificationAudit(record) {
     try {
@@ -496,7 +493,7 @@ export async function getUserLevelData(client, guildId, userId) {
             xp: data.xp || 0,
             level: data.level || 0,
             totalXp: data.totalXp || 0,
-            lastMessage: data.lastMessage || 0,
+            lastMessage: toEpochMs(data.lastMessage ?? data.last_message, 0),
             rank: data.rank || 0,
             xpToNextLevel: getXpForLevel((data.level || 0) + 1)
         };
@@ -523,7 +520,7 @@ export async function saveUserLevelData(client, guildId, userId, data) {
             xp: data.xp || 0,
             level: data.level || 0,
             totalXp: data.totalXp || 0,
-            lastMessage: data.lastMessage || 0,
+            lastMessage: toEpochMs(data.lastMessage ?? data.last_message, 0),
             rank: data.rank || 0,
             updatedAt: Date.now()
         };
@@ -1186,11 +1183,7 @@ export function formatChannelName(template, variables) {
     }
     
     formatted = formatted.replace(/[^\w\s-]/g, '').trim();
-formatted = formatted.substring(0, 100);
+    formatted = formatted.substring(0, 100);
     
     return formatted || 'Voice Channel';
-}
-
-function generateCaseId() {
-    return `${Date.now().toString(36)}-${Math.random().toString(36).substr(2, 4)}`;
 }

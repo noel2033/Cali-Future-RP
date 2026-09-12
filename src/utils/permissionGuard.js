@@ -14,10 +14,12 @@ export function getCommandDefaultPermissions(commandData) {
   const json = commandData?.toJSON?.() ?? commandData;
   const value = json?.default_member_permissions;
 
-  if (value == null || value === '0') {
+  if (value == null) {
     return null;
   }
 
+  // Discord uses "0" to hide the command from everyone except admins.
+  // Treat it as a real bitfield, not "no restriction".
   return BigInt(value);
 }
 
@@ -77,7 +79,11 @@ export function memberHasModerationCommandAccess(member, guildConfig, requiredPe
     return true;
   }
 
-  if (requiredPermissions != null && member.permissions.has(requiredPermissions)) {
+  if (
+    requiredPermissions != null &&
+    requiredPermissions !== 0n &&
+    member.permissions.has(requiredPermissions)
+  ) {
     return true;
   }
 
@@ -109,6 +115,15 @@ export function memberMeetsCommandPermissions(member, permissionBitfield, option
 
   if (member.guild?.ownerId === member.id) {
     return true;
+  }
+
+  if (member.permissions.has(PermissionFlagsBits.Administrator)) {
+    return true;
+  }
+
+  // "0" means no default member permissions — owner/admin already handled.
+  if (permissionBitfield === 0n) {
+    return false;
   }
 
   return member.permissions.has(permissionBitfield);
@@ -221,6 +236,15 @@ export async function checkUserPermissions(
   errorMessage = 'You do not have permission to use this command.'
 ) {
   const member = interaction.member;
+
+  if (!member) {
+    await replyUserError(interaction, {
+      type: ErrorTypes.PERMISSION,
+      message: errorMessage,
+      context: { source: 'permissionGuard.checkUserPermissions' }
+    });
+    return false;
+  }
 
   if (!member.permissions.has(requiredPermissions)) {
     await replyUserError(interaction, {

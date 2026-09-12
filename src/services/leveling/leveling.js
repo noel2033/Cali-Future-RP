@@ -6,6 +6,7 @@ import { getGuildConfig, setGuildConfig } from '../config/guildConfig.js';
 import { TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
 import { addXp } from './xpSystem.js';
 import { getUserLevelKey } from '../../utils/database/keys.js';
+import { toEpochMs } from '../../utils/database/timestamps.js';
 
 const BASE_XP = 100;
 const XP_MULTIPLIER = 1.5;
@@ -207,7 +208,7 @@ export async function getUserLevelData(client, guildId, userId) {
       xp: Math.max(0, data.xp || 0),
       level: Math.max(0, Math.min(data.level || 0, MAX_LEVEL)),
       totalXp: Math.max(0, data.totalXp || 0),
-      lastMessage: data.lastMessage || 0,
+      lastMessage: toEpochMs(data.lastMessage ?? data.last_message, 0),
       rank: data.rank || 0
     };
   } catch (error) {
@@ -241,7 +242,7 @@ export async function saveUserLevelData(client, guildId, userId, data) {
       xp: Math.max(0, Number(data.xp) || 0),
       level: Math.max(0, Math.min(Number(data.level) || 0, MAX_LEVEL)),
       totalXp: Math.max(0, Number(data.totalXp) || 0),
-      lastMessage: Number(data.lastMessage) || 0,
+      lastMessage: toEpochMs(data.lastMessage ?? data.last_message, 0),
       rank: Number(data.rank) || 0
     };
 

@@ -4,8 +4,6 @@ import { EmbedBuilder } from 'discord.js';
 import { getColor, botConfig } from '../config/bot.js';
 
 const EMOJI_REGEX = /[\p{Extended_Pictographic}\uFE0F]/gu;
-const EMBED_FOOTER_SYMBOL = Symbol('titanbotFooterText');
-const EMBED_BASE_DESCRIPTION_SYMBOL = Symbol('titanbotBaseDescription');
 
 function sanitizeEmbedText(text = '') {
   if (typeof text !== 'string') {
@@ -62,53 +60,30 @@ EmbedBuilder.prototype.addFields = function addSanitizedFields(...fields) {
   return originalAddFields.call(this, sanitized);
 };
 
-function normalizeFooterText(footer) {
-  if (!footer) {
-    return '';
-  }
+const originalSetDescription = EmbedBuilder.prototype.setDescription;
+const originalSetFooter = EmbedBuilder.prototype.setFooter;
 
+EmbedBuilder.prototype.setDescription = function setSanitizedDescription(description = '') {
+  return originalSetDescription.call(this, sanitizeEmbedText(description || ''));
+};
+
+EmbedBuilder.prototype.setFooter = function setSanitizedFooter(footer) {
   if (typeof footer === 'string') {
-    return footer.trim();
+    const text = sanitizeEmbedText(footer);
+    if (!text) {
+      return this;
+    }
+    return originalSetFooter.call(this, { text });
   }
 
   if (footer && typeof footer.text === 'string') {
-    return footer.text.trim();
+    return originalSetFooter.call(this, {
+      ...footer,
+      text: sanitizeEmbedText(footer.text),
+    });
   }
 
-  return '';
-}
-
-function isImportantFooter(footerText) {
-  if (!footerText) {
-    return false;
-  }
-
-  const normalized = footerText.toLowerCase();
-  return /\b(close|closes|closed|expire|expires|available in|page\s+\d+|dashboard closes|ticket id)\b/.test(normalized);
-}
-
-const originalSetDescription = EmbedBuilder.prototype.setDescription;
-const originalSetFooter = EmbedBuilder.prototype.setFooter;
-const originalSetTimestamp = EmbedBuilder.prototype.setTimestamp;
-
-EmbedBuilder.prototype.setDescription = function(description = '') {
-  const descString = sanitizeEmbedText(description || '');
-  this[EMBED_BASE_DESCRIPTION_SYMBOL] = descString;
-  return originalSetDescription.call(this, descString);
-};
-
-EmbedBuilder.prototype.setFooter = function(footer) {
-  const footerText = sanitizeEmbedText(normalizeFooterText(footer));
-  if (!footerText || !isImportantFooter(footerText)) {
-    return this;
-  }
-
-  this[EMBED_FOOTER_SYMBOL] = footerText;
-  return originalSetFooter.call(this, { text: footerText });
-};
-
-EmbedBuilder.prototype.setTimestamp = function() {
-  return this;
+  return originalSetFooter.call(this, footer);
 };
 
 export function createEmbed({

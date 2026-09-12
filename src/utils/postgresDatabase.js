@@ -14,32 +14,13 @@ import {
     getStructuredListPlan,
 } from './database/keyParser.js';
 import { runKeyMigration } from './database/keyMigration.js';
+import { toDate, toEpochMs } from './database/timestamps.js';
 import {
     tableStatements,
     indexStatements,
     UPDATE_TIMESTAMP_FUNCTION,
     triggerDefinitions,
 } from './database/schema.js';
-
-function normalizeTimestampInput(value, fallback = new Date()) {
-    if (value instanceof Date && !Number.isNaN(value.getTime())) {
-        return value;
-    }
-
-    const numericValue = typeof value === 'string' && /^[0-9]+$/.test(value)
-        ? Number(value)
-        : Number(value);
-
-    if (Number.isFinite(numericValue) && numericValue >= 0) {
-        const date = new Date(numericValue);
-        if (!Number.isNaN(date.getTime())) {
-            return date;
-        }
-    }
-
-    const parsedDate = new Date(value);
-    return !Number.isNaN(parsedDate.getTime()) ? parsedDate : fallback;
-}
 
 class PostgreSQLDatabase {
     constructor() {
@@ -666,7 +647,7 @@ class PostgreSQLDatabase {
                         xp: Number(levelRow.xp) || 0,
                         level: Number(levelRow.level) || 0,
                         totalXp: Number(levelRow.total_xp) || 0,
-                        lastMessage: Number(levelRow.last_message) || 0,
+                        lastMessage: toEpochMs(levelRow.last_message, 0),
                         rank: Number(levelRow.rank) || 0,
                     };
                 }
@@ -834,7 +815,7 @@ class PostgreSQLDatabase {
                     );
 
                     const lastMessageValue = value?.lastMessage ?? value?.last_message;
-                    const normalizedLastMessage = normalizeTimestampInput(lastMessageValue, new Date());
+                    const normalizedLastMessage = toDate(lastMessageValue, new Date(0));
                     
                     await this.pool.query(
                         `INSERT INTO ${pgConfig.tables.user_levels} (guild_id, user_id, xp, level, total_xp, last_message, rank, updated_at) 
