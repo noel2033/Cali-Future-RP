@@ -20,7 +20,14 @@ export function getCommandDefaultPermissions(commandData) {
 
   // Discord uses "0" to hide the command from everyone except admins.
   // Treat it as a real bitfield, not "no restriction".
-  return BigInt(value);
+  try {
+    return BigInt(value);
+  } catch {
+    logger.warn('[PERMISSION] Invalid default_member_permissions; treating as admin-only', {
+      value: String(value),
+    });
+    return 0n;
+  }
 }
 
 function normalizeRoleId(role) {
@@ -212,10 +219,10 @@ export function isModerator(member, guildConfig = null) {
   if (memberHasConfiguredModeratorRole(member, guildConfig)) {
     return true;
   }
-  return member.permissions.has([
-    PermissionFlagsBits.Administrator,
-    PermissionFlagsBits.ManageGuild
-  ]);
+  return (
+    member.permissions.has(PermissionFlagsBits.Administrator) ||
+    member.permissions.has(PermissionFlagsBits.ManageGuild)
+  );
 }
 
 export function hasPermission(member, permissions) {

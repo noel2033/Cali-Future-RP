@@ -14,7 +14,7 @@ import {
     getStructuredListPlan,
 } from './database/keyParser.js';
 import { runKeyMigration } from './database/keyMigration.js';
-import { toDate, toEpochMs } from './database/timestamps.js';
+import { toDate, toEpochMs, toNonNegativeInt } from './database/timestamps.js';
 import {
     tableStatements,
     indexStatements,
@@ -644,11 +644,11 @@ class PostgreSQLDatabase {
                     // Map snake_case columns to the camelCase shape consumers expect
                     const levelRow = userLevelResult.rows[0];
                     return {
-                        xp: Number(levelRow.xp) || 0,
-                        level: Number(levelRow.level) || 0,
-                        totalXp: Number(levelRow.total_xp) || 0,
+                        xp: toNonNegativeInt(levelRow.xp),
+                        level: toNonNegativeInt(levelRow.level),
+                        totalXp: toNonNegativeInt(levelRow.total_xp),
                         lastMessage: toEpochMs(levelRow.last_message, 0),
-                        rank: Number(levelRow.rank) || 0,
+                        rank: toNonNegativeInt(levelRow.rank),
                     };
                 }
                 
@@ -822,7 +822,15 @@ class PostgreSQLDatabase {
                          VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP) 
                          ON CONFLICT (guild_id, user_id) DO UPDATE SET 
                          xp = $3, level = $4, total_xp = $5, last_message = $6, rank = $7, updated_at = CURRENT_TIMESTAMP`,
-                        [parsedKey.guildId, parsedKey.userId, value.xp || 0, value.level || 0, value.totalXp || 0, normalizedLastMessage, value.rank || 0]
+                        [
+                            parsedKey.guildId,
+                            parsedKey.userId,
+                            toNonNegativeInt(value.xp),
+                            toNonNegativeInt(value.level),
+                            toNonNegativeInt(value.totalXp ?? value.total_xp),
+                            normalizedLastMessage,
+                            toNonNegativeInt(value.rank),
+                        ]
                     );
                     return true;
                 

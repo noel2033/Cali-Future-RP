@@ -5,12 +5,13 @@
 import 'dotenv/config';
 import { Client, Collection, EmbedBuilder, GatewayIntentBits, PermissionFlagsBits } from 'discord.js';
 import { createEmbed } from '../src/utils/embeds.js';
-import { toDate, toEpochMs } from '../src/utils/database/timestamps.js';
+import { toDate, toEpochMs, toNonNegativeInt } from '../src/utils/database/timestamps.js';
 import {
   getCommandDefaultPermissions,
   memberMeetsCommandPermissions,
   memberHasModerationCommandAccess,
   checkUserPermissions,
+  isModerator,
 } from '../src/utils/permissionGuard.js';
 import { loadCommands } from '../src/handlers/loaders/commandLoader.js';
 import loadEvents from '../src/handlers/loaders/events.js';
@@ -68,6 +69,9 @@ async function checkTimestamps() {
   assert(toEpochMs(undefined, 0) === 0, 'toEpochMs(undefined) uses fallback 0');
   assert(toDate(0).getTime() === 0, 'toDate(0) is epoch, not "now"');
   assert(toDate(iso).toISOString() === iso, 'toDate(ISO string) round-trips');
+  assert(toNonNegativeInt(2.9) === 2, 'toNonNegativeInt floors fractional XP/level values');
+  assert(toNonNegativeInt('15') === 15, 'toNonNegativeInt parses numeric strings');
+  assert(getXpForLevel(toNonNegativeInt(2.9) + 1) > 0, 'floored levels are valid for getXpForLevel');
 }
 
 async function checkEmbeds() {
@@ -91,6 +95,27 @@ async function checkEmbeds() {
   const createdData = created.toJSON();
   assert(createdData.footer?.text === 'Page 2 of 4', 'createEmbed keeps ordinary footers');
   assert(Boolean(createdData.timestamp), 'createEmbed({ timestamp: true }) sets a timestamp');
+
+  let sanitizerThrew = false;
+  try {
+    new EmbedBuilder()
+      .setTitle('🎉')
+      .setDescription('🎉')
+      .setFooter({ text: '🎉' })
+      .addFields({ name: '🎉', value: '🎉' })
+      .setAuthor('🎉');
+  } catch {
+    sanitizerThrew = true;
+  }
+  assert(!sanitizerThrew, 'emoji-only embed text does not throw after sanitization');
+
+  let invalidTimestampThrew = false;
+  try {
+    createEmbed({ title: 'Notice', description: 'Hello', timestamp: new Date('not-a-date') });
+  } catch {
+    invalidTimestampThrew = true;
+  }
+  assert(!invalidTimestampThrew, 'invalid Date timestamp does not throw in createEmbed');
 }
 
 async function checkPermissions() {
@@ -102,6 +127,10 @@ async function checkPermissions() {
   assert(
     getCommandDefaultPermissions(zeroPermCommand) === 0n,
     'default_member_permissions "0" is admin-only, not unrestricted',
+  );
+  assert(
+    getCommandDefaultPermissions({ default_member_permissions: 'not-a-bitfield' }) === 0n,
+    'invalid default_member_permissions fails closed as admin-only',
   );
 
   const regular = mockMember({ permissions: PermissionFlagsBits.SendMessages });
@@ -124,6 +153,10 @@ async function checkPermissions() {
   assert(
     memberHasModerationCommandAccess(mockMember({ roles: ['mod'] }), { modRole: 'mod' }, 0n) === true,
     'configured modRole still grants moderation access',
+  );
+  assert(
+    isModerator(mockMember({ permissions: PermissionFlagsBits.ManageGuild })) === true,
+    'ManageGuild-only member counts as moderator',
   );
 
   const replies = [];

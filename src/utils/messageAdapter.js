@@ -2,7 +2,6 @@
 
 import { mapArgumentsToOptions } from './prefixParser.js';
 import { handleInteractionError } from './errorHandler.js';
-import { logger } from './logger.js';
 import { InteractionHelper } from './interactionHelper.js';
 import { SLASH_ONLY_COMMANDS } from '../config/commands/prefixRestrictions.js';
 import { getCommandPrefix } from '../config/bot.js';

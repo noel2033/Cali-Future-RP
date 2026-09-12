@@ -19,15 +19,26 @@ function sanitizeEmbedText(text = '') {
     .trim();
 }
 
+function nonEmptySanitizedText(text) {
+  const sanitized = sanitizeEmbedText(text);
+  return typeof sanitized === 'string' && sanitized.length > 0 ? sanitized : null;
+}
+
 function sanitizeEmbedField(field) {
   if (!field || typeof field !== 'object') {
-    return field;
+    return null;
+  }
+
+  const name = nonEmptySanitizedText(field.name);
+  const value = nonEmptySanitizedText(field.value);
+  if (!name || !value) {
+    return null;
   }
 
   return {
     ...field,
-    name: sanitizeEmbedText(field.name),
-    value: sanitizeEmbedText(field.value),
+    name,
+    value,
   };
 }
 
@@ -36,18 +47,30 @@ const originalSetAuthor = EmbedBuilder.prototype.setAuthor;
 const originalAddFields = EmbedBuilder.prototype.addFields;
 
 EmbedBuilder.prototype.setTitle = function setSanitizedTitle(title) {
-  return originalSetTitle.call(this, sanitizeEmbedText(title));
+  const sanitized = nonEmptySanitizedText(title);
+  if (!sanitized) {
+    return this;
+  }
+  return originalSetTitle.call(this, sanitized);
 };
 
 EmbedBuilder.prototype.setAuthor = function setSanitizedAuthor(author) {
   if (typeof author === 'string') {
-    return originalSetAuthor.call(this, sanitizeEmbedText(author));
+    const name = nonEmptySanitizedText(author);
+    if (!name) {
+      return this;
+    }
+    return originalSetAuthor.call(this, { name });
   }
 
   if (author && typeof author.name === 'string') {
+    const name = nonEmptySanitizedText(author.name);
+    if (!name) {
+      return this;
+    }
     return originalSetAuthor.call(this, {
       ...author,
-      name: sanitizeEmbedText(author.name),
+      name,
     });
   }
 
@@ -56,7 +79,10 @@ EmbedBuilder.prototype.setAuthor = function setSanitizedAuthor(author) {
 
 EmbedBuilder.prototype.addFields = function addSanitizedFields(...fields) {
   const normalized = fields.flatMap((field) => (Array.isArray(field) ? field : [field]));
-  const sanitized = normalized.map(sanitizeEmbedField);
+  const sanitized = normalized.map(sanitizeEmbedField).filter(Boolean);
+  if (sanitized.length === 0) {
+    return this;
+  }
   return originalAddFields.call(this, sanitized);
 };
 
@@ -64,12 +90,16 @@ const originalSetDescription = EmbedBuilder.prototype.setDescription;
 const originalSetFooter = EmbedBuilder.prototype.setFooter;
 
 EmbedBuilder.prototype.setDescription = function setSanitizedDescription(description = '') {
-  return originalSetDescription.call(this, sanitizeEmbedText(description || ''));
+  const sanitized = nonEmptySanitizedText(description || '');
+  if (!sanitized) {
+    return this;
+  }
+  return originalSetDescription.call(this, sanitized);
 };
 
 EmbedBuilder.prototype.setFooter = function setSanitizedFooter(footer) {
   if (typeof footer === 'string') {
-    const text = sanitizeEmbedText(footer);
+    const text = nonEmptySanitizedText(footer);
     if (!text) {
       return this;
     }
@@ -77,9 +107,13 @@ EmbedBuilder.prototype.setFooter = function setSanitizedFooter(footer) {
   }
 
   if (footer && typeof footer.text === 'string') {
+    const text = nonEmptySanitizedText(footer.text);
+    if (!text) {
+      return this;
+    }
     return originalSetFooter.call(this, {
       ...footer,
-      text: sanitizeEmbedText(footer.text),
+      text,
     });
   }
 
@@ -186,7 +220,7 @@ export function createEmbed({
 
   if (timestamp === true) {
     embed.setTimestamp();
-  } else if (timestamp instanceof Date) {
+  } else if (timestamp instanceof Date && !Number.isNaN(timestamp.getTime())) {
     embed.setTimestamp(timestamp);
   }
 

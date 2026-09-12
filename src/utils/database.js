@@ -73,7 +73,7 @@ import {
     getWelcomeConfigKey,
     getUserLevelPrefix,
 } from './database/keys.js';
-import { toEpochMs } from './database/timestamps.js';
+import { toEpochMs, toNonNegativeInt } from './database/timestamps.js';
 
 export async function insertVerificationAudit(record) {
     try {
@@ -490,12 +490,12 @@ export async function getUserLevelData(client, guildId, userId) {
         }
         
         const levelData = {
-            xp: data.xp || 0,
-            level: data.level || 0,
-            totalXp: data.totalXp || 0,
+            xp: toNonNegativeInt(data.xp),
+            level: toNonNegativeInt(data.level),
+            totalXp: toNonNegativeInt(data.totalXp ?? data.total_xp),
             lastMessage: toEpochMs(data.lastMessage ?? data.last_message, 0),
-            rank: data.rank || 0,
-            xpToNextLevel: getXpForLevel((data.level || 0) + 1)
+            rank: toNonNegativeInt(data.rank),
+            xpToNextLevel: getXpForLevel((toNonNegativeInt(data.level)) + 1)
         };
         
         return levelData;
@@ -517,11 +517,11 @@ export async function saveUserLevelData(client, guildId, userId, data) {
     try {
         const levelData = {
             ...data,
-            xp: data.xp || 0,
-            level: data.level || 0,
-            totalXp: data.totalXp || 0,
+            xp: toNonNegativeInt(data.xp),
+            level: toNonNegativeInt(data.level),
+            totalXp: toNonNegativeInt(data.totalXp ?? data.total_xp),
             lastMessage: toEpochMs(data.lastMessage ?? data.last_message, 0),
-            rank: data.rank || 0,
+            rank: toNonNegativeInt(data.rank),
             updatedAt: Date.now()
         };
         

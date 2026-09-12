@@ -34,6 +34,14 @@ export function toDate(value, fallback = new Date(0)) {
     return Number.isNaN(parsedDate.getTime()) ? fallbackDate(fallback) : parsedDate;
 }
 
+export function toNonNegativeInt(value, fallback = 0) {
+    const n = Math.floor(Number(value));
+    if (!Number.isFinite(n) || n < 0) {
+        return fallback;
+    }
+    return n;
+}
+
 export function toEpochMs(value, fallback = 0) {
     if (value == null || value === '') {
         return fallback;

@@ -327,8 +327,7 @@ class TitanBot extends Client {
     try {
       await registerSlashCommands(this, { clientId: this.config.bot.clientId });
       return true;
-    } catch (error) {
-      logger.error('Error registering commands:', error);
+    } catch {
       return false;
     }
   }
@@ -379,7 +378,7 @@ class TitanBot extends Client {
       }
 
       logger.info('✅ Graceful shutdown complete');
-  shutdownLog('Bot stopped successfully.');
+      shutdownLog('Bot stopped successfully.');
       process.exit(0);
     } catch (error) {
       logger.error('Error during graceful shutdown:', error);
