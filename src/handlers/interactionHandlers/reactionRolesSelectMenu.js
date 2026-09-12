@@ -4,7 +4,8 @@ import { logger } from '../../utils/logger.js';
 import { handleInteractionError, createError, ErrorTypes } from '../../utils/errorHandler.js';
 import { getColor } from '../../config/bot.js';
 import { logEvent, EVENT_TYPES } from '../../services/loggingService.js';
-import { getReactionRoleMessage } from '../../services/reactionRoleService.js';
+import { getReactionRoleMessage, hasDangerousPermissions } from '../../services/reactionRoleService.js';
+import { hasPermission } from '../../utils/permissionGuard.js';
 
 export async function handleReactionRolesSelectMenu(interaction, client) {
     try {
@@ -49,7 +50,7 @@ export async function handleReactionRolesSelectMenu(interaction, client) {
             );
         }
 
-        if (!me.permissions.has('ManageRoles')) {
+        if (!hasPermission(me, 'ManageRoles')) {
             throw createError(
                 'Bot missing ManageRoles permission',
                 ErrorTypes.PERMISSION,
@@ -81,16 +82,14 @@ export async function handleReactionRolesSelectMenu(interaction, client) {
                 continue;
             }
 
-            const roleHasDangerousPermissions = role.permissions.has([
-                'Administrator',
-                'ManageGuild',
-                'ManageRoles',
-                'ManageChannels',
-                'ManageWebhooks',
-                'BanMembers',
-                'KickMembers',
-                'MentionEveryone'
-            ]);
+            let roleHasDangerousPermissions = true;
+            try {
+                roleHasDangerousPermissions =
+                    hasDangerousPermissions(role) ||
+                    Boolean(role.permissions?.has('MentionEveryone'));
+            } catch {
+                roleHasDangerousPermissions = true;
+            }
 
             if (role.managed || roleHasDangerousPermissions) {
                 logger.warn(`Blocked self-assignment for protected role ${role.name} (${roleId})`);

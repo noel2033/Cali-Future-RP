@@ -48,6 +48,18 @@ const validatedTables = Object.fromEntries(
 
 const DEFAULT_POSTGRES_URL = 'postgresql://localhost:5432/titanbot';
 
+export function resolveConfiguredPostgresUrl(env = process.env) {
+    return String(env.POSTGRES_URL || env.DATABASE_URL || '').trim();
+}
+
+export function requireConfiguredPostgresUrl(env = process.env) {
+    const url = resolveConfiguredPostgresUrl(env);
+    if (!url) {
+        throw new Error('POSTGRES_URL (or DATABASE_URL) is required');
+    }
+    return url;
+}
+
 export function resolveSslConfig() {
     const sslEnv = process.env.POSTGRES_SSL?.toLowerCase();
     if (sslEnv === 'false' || sslEnv === '0') {

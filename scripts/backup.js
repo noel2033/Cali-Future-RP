@@ -4,6 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import { logger } from '../src/utils/logger.js';
+import { requireConfiguredPostgresUrl } from '../src/config/database/postgres.js';
+import { redactDatabaseSecrets } from '../src/utils/database/redactUrl.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
@@ -34,14 +36,6 @@ function parseArgs(argv) {
   }
 
   return args;
-}
-
-function assertEnv(name) {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value;
 }
 
 function ensureCommand(command) {
@@ -95,7 +89,7 @@ async function pruneBackups(backupDir, retentionDays) {
 
 async function run() {
   const args = parseArgs(process.argv.slice(2));
-  const databaseUrl = assertEnv('POSTGRES_URL');
+  const databaseUrl = requireConfiguredPostgresUrl();
   const retentionDays = Number.parseInt(args['retention-days'] || process.env.BACKUP_RETENTION_DAYS || '14', 10);
   const backupDir = path.resolve(args['backup-dir'] || process.env.BACKUP_DIR || path.join(process.cwd(), 'backups'));
 
@@ -127,7 +121,7 @@ async function run() {
   });
 
   if (result.status !== 0) {
-    throw new Error(`pg_dump failed: ${result.stderr || result.stdout || 'Unknown error'}`);
+    throw new Error(`pg_dump failed: ${redactDatabaseSecrets(result.stderr || result.stdout || 'Unknown error')}`);
   }
 
   await pruneBackups(backupDir, retentionDays);
@@ -144,7 +138,7 @@ async function run() {
 run().catch((error) => {
   logger.error('Backup command failed', {
     event: 'backup.failed',
-    error: error.message
+    error: redactDatabaseSecrets(error.message)
   });
   process.exit(1);
 });

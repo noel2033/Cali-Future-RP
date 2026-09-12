@@ -56,3 +56,6 @@ jobs:
 
       - name: Validate migration version
         run: npm run migrate:check
+
+      - name: Run smoke checks
+        run: npm test

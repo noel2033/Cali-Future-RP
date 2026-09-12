@@ -7,7 +7,12 @@ export function messageHasButtonCustomId(message, buttonCustomId) {
 
     const walk = (components) => {
         for (const component of components) {
-            const json = typeof component.toJSON === 'function' ? component.toJSON() : component;
+            let json;
+            try {
+                json = typeof component.toJSON === 'function' ? component.toJSON() : component;
+            } catch {
+                continue;
+            }
             if (!json) continue;
             if (json.type === 2 && json.custom_id === buttonCustomId) return true;
             if (Array.isArray(json.components) && walk(json.components)) return true;
@@ -24,7 +29,12 @@ export function messageHasSelectMenuCustomId(message, selectCustomId) {
 
     const walk = (components) => {
         for (const component of components) {
-            const json = typeof component.toJSON === 'function' ? component.toJSON() : component;
+            let json;
+            try {
+                json = typeof component.toJSON === 'function' ? component.toJSON() : component;
+            } catch {
+                continue;
+            }
             if (!json) continue;
             if (json.type === 3 && json.custom_id === selectCustomId) return true;
             if (Array.isArray(json.components) && walk(json.components)) return true;
@@ -100,7 +110,7 @@ export async function getBotPanelStatus(client, guild, {
         ? [...(typeof messages.values === 'function' ? messages.values() : messages)]
         : [];
     const recovered = messageList.find(
-        (entry) => entry.author.id === client.user.id && messageHasPanelMarker(entry, marker),
+        (entry) => entry?.author?.id === client.user?.id && messageHasPanelMarker(entry, marker),
     );
 
     if (recovered) {

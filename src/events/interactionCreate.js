@@ -19,6 +19,7 @@ import { resolveSlashAccessKey } from '../utils/messageAdapter.js';
 import { isCollectorManagedComponent } from '../utils/collectorComponents.js';
 import { ResponseCoordinator } from '../utils/responseCoordinator.js';
 import { enforceDefaultCommandPermissions } from '../utils/permissionGuard.js';
+import { isComponentAllowed } from '../utils/componentAccess.js';
 
 const COMMAND_ERROR_SUBTYPES = {
   warn: 'warn_failed',
@@ -36,6 +37,12 @@ const COMMAND_ERROR_SUBTYPES = {
   greroll: 'giveaway_failed',
 };
 
+const UNKNOWN_DISCORD_ENTITY_CODES = new Set([10003, 10008]);
+
+function isUnknownDiscordEntityError(error) {
+  return UNKNOWN_DISCORD_ENTITY_CODES.has(error?.code);
+}
+
 function withTraceContext(context = {}, traceContext = {}) {
   return {
     traceId: traceContext.traceId,
@@ -44,6 +51,30 @@ function withTraceContext(context = {}, traceContext = {}) {
     command: context.commandName || traceContext.command,
     ...context
   };
+}
+
+async function enforceComponentAccess(interaction, client, handler, traceContext) {
+  if (isMaintenanceMode() && !isBotOwner(interaction.user.id)) {
+    throw createError(
+      'Bot is in maintenance mode',
+      ErrorTypes.CONFIGURATION,
+      getBotMessage('maintenanceMode'),
+      withTraceContext({ customId: interaction.customId }, traceContext)
+    );
+  }
+
+  if (!(await isComponentAllowed(client, interaction.guildId, handler))) {
+    throw createError(
+      `Component ${handler?.commandName || interaction.customId} is disabled in this guild`,
+      ErrorTypes.CONFIGURATION,
+      'This command has been disabled for this server.',
+      withTraceContext({
+        commandName: handler?.commandName,
+        customId: interaction.customId,
+        guildId: interaction.guildId,
+      }, traceContext)
+    );
+  }
 }
 
 export default {
@@ -170,6 +201,16 @@ export default {
           }
         } else if (interaction.isAutocomplete()) {
           const autocompleteCommand = client.commands.get(interaction.commandName);
+          if (interaction.guildId && autocompleteCommand) {
+            if (isMaintenanceMode() && !isBotOwner(interaction.user.id)) {
+              await interaction.respond([]).catch(() => {});
+              return;
+            }
+            if (!(await isCommandEnabled(client, interaction.guildId, interaction.commandName, autocompleteCommand.category))) {
+              await interaction.respond([]).catch(() => {});
+              return;
+            }
+          }
           if (autocompleteCommand?.autocomplete) {
             try {
               await autocompleteCommand.autocomplete(interaction, client);
@@ -184,7 +225,13 @@ export default {
             return;
           }
 
-          const focusedOption = interaction.options.getFocused(true);
+          let focusedOption;
+          try {
+            focusedOption = interaction.options.getFocused(true);
+          } catch {
+            await interaction.respond([]).catch(() => {});
+            return;
+          }
           
           if (interaction.commandName === 'apply' && focusedOption.name === 'application') {
             try {
@@ -193,7 +240,8 @@ export default {
               const roleName = interaction.options.getString('application', false);
 
               const filtered = roles.filter(role =>
-                role.enabled !== false && 
+                role?.enabled !== false &&
+                typeof role?.name === 'string' &&
                 role.name.toLowerCase().startsWith(roleName?.toLowerCase() || '')
               );
               
@@ -209,7 +257,7 @@ export default {
                 guildId: interaction.guildId,
                 commandName: interaction.commandName
               });
-              await interaction.respond([]);
+              await interaction.respond([]).catch(() => {});
             }
           } else if (interaction.commandName === 'app-admin' && focusedOption.name === 'application') {
             try {
@@ -218,6 +266,7 @@ export default {
               const appName = interaction.options.getString('application', false);
 
               const filtered = roles.filter(role =>
+                typeof role?.name === 'string' &&
                 role.name.toLowerCase().startsWith(appName?.toLowerCase() || '')
               );
               
@@ -233,7 +282,7 @@ export default {
                 guildId: interaction.guildId,
                 commandName: interaction.commandName
               });
-              await interaction.respond([]);
+              await interaction.respond([]).catch(() => {});
             }
           } else if (interaction.commandName === 'reactroles' && focusedOption.name === 'panel') {
             try {
@@ -243,8 +292,8 @@ export default {
               
               let panels = await getAllReactionRoleMessages(client, guildId);
               
-              if (!panels || panels.length === 0) {
-                await interaction.respond([]);
+              if (!Array.isArray(panels) || panels.length === 0) {
+                await interaction.respond([]).catch(() => {});
                 return;
               }
 
@@ -253,23 +302,61 @@ export default {
                 if (!panel.messageId || !panel.channelId) {
                   continue;
                 }
-                
-                const channel = guild.channels.cache.get(panel.channelId);
+
+                let channel = guild.channels.cache.get(panel.channelId);
                 if (!channel) {
-                  await deleteReactionRoleMessage(client, guildId, panel.messageId).catch(() => {});
+                  let channelMissing = false;
+                  channel = await guild.channels.fetch(panel.channelId).catch((error) => {
+                    if (isUnknownDiscordEntityError(error)) {
+                      channelMissing = true;
+                      return null;
+                    }
+                    logger.debug('Skipping reactroles panel after channel fetch failure', {
+                      guildId,
+                      channelId: panel.channelId,
+                      error: error?.message,
+                    });
+                    return undefined;
+                  });
+                  if (channel === undefined) {
+                    continue;
+                  }
+                  if (!channel && channelMissing) {
+                    await deleteReactionRoleMessage(client, guildId, panel.messageId).catch(() => {});
+                    continue;
+                  }
+                  if (!channel) {
+                    continue;
+                  }
+                }
+
+                let messageMissing = false;
+                const msg = await channel.messages.fetch(panel.messageId).catch((error) => {
+                  if (isUnknownDiscordEntityError(error)) {
+                    messageMissing = true;
+                    return null;
+                  }
+                  logger.debug('Skipping reactroles panel after message fetch failure', {
+                    guildId,
+                    messageId: panel.messageId,
+                    error: error?.message,
+                  });
+                  return undefined;
+                });
+                if (msg === undefined) {
                   continue;
                 }
-                
-                const msg = await channel.messages.fetch(panel.messageId).catch(() => null);
                 if (!msg) {
-                  await deleteReactionRoleMessage(client, guildId, panel.messageId).catch(() => {});
+                  if (messageMissing) {
+                    await deleteReactionRoleMessage(client, guildId, panel.messageId).catch(() => {});
+                  }
                   continue;
                 }
                 validPanels.push(panel);
               }
               
               if (validPanels.length === 0) {
-                await interaction.respond([]);
+                await interaction.respond([]).catch(() => {});
                 return;
               }
               
@@ -303,8 +390,10 @@ export default {
                 guildId: interaction.guildId,
                 commandName: interaction.commandName
               });
-              await interaction.respond([]);
+              await interaction.respond([]).catch(() => {});
             }
+          } else {
+            await interaction.respond([]).catch(() => {});
           }
         } else if (interaction.isButton()) {
           if (interaction.customId.startsWith('shared_todo_')) {
@@ -315,6 +404,7 @@ export default {
 
             if (button) {
               try {
+                await enforceComponentAccess(interaction, client, button, interactionTraceContext);
                 await button.execute(interaction, client, [listId]);
               } catch (error) {
                 await handleInteractionError(interaction, error, withTraceContext({
@@ -351,6 +441,7 @@ export default {
           }
 
           try {
+            await enforceComponentAccess(interaction, client, button, interactionTraceContext);
             await button.execute(interaction, client, args);
           } catch (error) {
             await handleInteractionError(interaction, error, withTraceContext({
@@ -377,6 +468,7 @@ export default {
           }
 
           try {
+            await enforceComponentAccess(interaction, client, selectMenu, interactionTraceContext);
             await selectMenu.execute(interaction, client, args);
           } catch (error) {
             await handleInteractionError(interaction, error, withTraceContext({
@@ -387,6 +479,7 @@ export default {
         } else if (interaction.isModalSubmit()) {
           if (interaction.customId.startsWith('app_modal_')) {
             try {
+              await enforceComponentAccess(interaction, client, { commandName: 'apply', category: 'Community' }, interactionTraceContext);
               await handleApplicationModal(interaction);
             } catch (error) {
               await handleInteractionError(interaction, error, withTraceContext({
@@ -430,6 +523,7 @@ export default {
           }
 
           try {
+            await enforceComponentAccess(interaction, client, modal, interactionTraceContext);
             await modal.execute(interaction, client, args);
           } catch (error) {
             await handleInteractionError(interaction, error, withTraceContext({

@@ -6,7 +6,6 @@ import cron from 'node-cron';
 
 import config from './config/application.js';
 import { initializeDatabase } from './utils/database.js';
-import { getGuildConfig } from './services/config/guildConfig.js';
 import { getServerCounters, saveServerCounters, updateCounter } from './services/serverstatsService.js';
 import { logger, startupLog, shutdownLog } from './utils/logger.js';
 import { checkBirthdays } from './services/birthdayService.js';
@@ -33,7 +32,7 @@ class TitanBot extends Client {
 
         GatewayIntentBits.GuildVoiceStates,             
 
-        GatewayIntentBits.GuildBans,                    
+        GatewayIntentBits.GuildModeration,
       ],
     });
 
@@ -45,17 +44,25 @@ class TitanBot extends Client {
     this.modals = new Collection();
     this.cooldowns = new Collection();
     this.db = null;
-    this.rest = new REST({ version: '10' }).setToken(config.bot.token);
+    this.rest = new REST({ version: '10' });
   }
 
   async start() {
     try {
       startupLog('Starting TitanBot...');
+      if (!this.config.bot?.token) {
+        throw new Error('Missing Discord bot token');
+      }
+      this.rest.setToken(this.config.bot.token);
       await new Promise(resolve => setTimeout(resolve, 1000));
       
       startupLog('Initializing database...');
       const dbInstance = await initializeDatabase();
-      this.db = dbInstance.db;
+      this.db = dbInstance?.db ?? null;
+
+      if (!this.db || typeof this.db.getStatus !== 'function') {
+        throw new Error('Database failed to initialize');
+      }
 
       // Check database status and report
       const dbStatus = this.db.getStatus();
@@ -91,8 +98,12 @@ class TitanBot extends Client {
       startupLog('Discord login successful');
       
       startupLog('Registering slash commands globally...');
-      await this.registerCommands();
-      startupLog('Slash commands registration complete');
+      const commandsRegistered = await this.registerCommands();
+      if (commandsRegistered) {
+        startupLog('Slash commands registration complete');
+      } else {
+        logger.error('Slash command registration failed; the bot will stay online with previously registered commands');
+      }
       
       const databaseMode = dbStatus.isDegraded
         ? 'Optional in-memory mode (data resets after restart)'
@@ -157,14 +168,14 @@ class TitanBot extends Client {
     });
 
     app.get('/health', (req, res) => {
-      const dbStatus = this.db?.getStatus?.() || { isDegraded: 'unknown' };
+      const dbStatus = this.db?.getStatus?.() || { isDegraded: true, connectionType: 'none' };
       const status = {
         status: 'healthy',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         database: {
-          connected: dbStatus.connectionType !== 'none',
-          degraded: dbStatus.isDegraded,
+          connected: Boolean(dbStatus.connectionType) && dbStatus.connectionType !== 'none',
+          degraded: Boolean(dbStatus.isDegraded),
           type: dbStatus.connectionType
         }
       };
@@ -259,15 +270,24 @@ class TitanBot extends Client {
       return;
     }
     
-    for (const [guildId, guild] of this.guilds.cache) {
+    const guilds = this.guilds?.cache;
+    if (!guilds || typeof guilds[Symbol.iterator] !== 'function') {
+      return;
+    }
+
+    for (const [guildId, guild] of guilds) {
       try {
         const counters = await getServerCounters(this, guildId);
+        if (!Array.isArray(counters)) {
+          continue;
+        }
+
         const validCounters = [];
         const orphanedCounters = [];
         
         for (const counter of counters) {
           if (counter && counter.type && counter.channelId && counter.enabled !== false) {
-            const channel = guild.channels.cache.get(counter.channelId);
+            const channel = guild.channels?.cache?.get(counter.channelId);
             if (channel) {
               validCounters.push(counter);
               await updateCounter(this, guild, counter);
@@ -278,8 +298,6 @@ class TitanBot extends Client {
           }
         }
         
-        // Save cleaned counters if any were orphaned
-        // Save cleaned counters if any were orphaned
         if (orphanedCounters.length > 0) {
           await saveServerCounters(this, guildId, validCounters);
           logger.info(`Cleaned up ${orphanedCounters.length} orphaned counter(s) from guild ${guildId} during scheduled update`);
@@ -325,8 +343,9 @@ class TitanBot extends Client {
   async registerCommands() {
     try {
       await registerSlashCommands(this, { clientId: this.config.bot.clientId });
-    } catch (error) {
-      logger.error('Error registering commands:', error);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -352,8 +371,6 @@ class TitanBot extends Client {
         logger.info('✅ Web server closed');
       }
 
-      // Close database connection
-      // Close database connection
       if (this.db && this.db.db) {
         logger.info('Closing database connection...');
         try {
@@ -378,7 +395,7 @@ class TitanBot extends Client {
       }
 
       logger.info('✅ Graceful shutdown complete');
-  shutdownLog('Bot stopped successfully.');
+      shutdownLog('Bot stopped successfully.');
       process.exit(0);
     } catch (error) {
       logger.error('Error during graceful shutdown:', error);

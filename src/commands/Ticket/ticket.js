@@ -5,6 +5,7 @@ import { getGuildConfig, setGuildConfig } from '../../services/config/guildConfi
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 import { logger } from '../../utils/logger.js';
 import { handleInteractionError, replyUserError, ErrorTypes } from '../../utils/errorHandler.js';
+import { hasPermission } from '../../utils/permissionGuard.js';
 
 import ticketConfig from './modules/ticket_dashboard.js';
 
@@ -100,7 +101,8 @@ export default {
         }
 
         if (
-            !interaction.member.permissions.has(
+            !hasPermission(
+                interaction.member,
                 PermissionFlagsBits.ManageChannels,
             )
         ) {

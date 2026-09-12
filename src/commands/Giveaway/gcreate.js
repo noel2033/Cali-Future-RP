@@ -1,5 +1,5 @@
-import { SlashCommandBuilder, PermissionFlagsBits, PermissionsBitField, ChannelType, MessageFlags } from 'discord.js';
-import { errorEmbed, successEmbed } from '../../utils/embeds.js';
+import { SlashCommandBuilder, PermissionFlagsBits, ChannelType, MessageFlags } from 'discord.js';
+import { successEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
 import { TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
 import { saveGiveaway } from '../../utils/giveaways.js';
@@ -12,6 +12,7 @@ import {
 } from '../../services/giveawayService.js';
 import { logEvent, EVENT_TYPES } from '../../services/loggingService.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+import { hasPermission } from '../../utils/permissionGuard.js';
 
 import { botConfig } from '../../config/bot.js';
 
@@ -66,7 +67,7 @@ export default {
             );
         }
 
-        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        if (!hasPermission(interaction.member, PermissionFlagsBits.ManageGuild)) {
             throw new TitanBotError(
                 'User lacks ManageGuild permission',
                 ErrorTypes.PERMISSION,
@@ -86,12 +87,12 @@ export default {
         validateWinnerCount(winnerCount);
         const prizeName = validatePrize(prize);
 
-        if (!targetChannel.isTextBased()) {
+        if (!targetChannel?.isTextBased?.()) {
             throw new TitanBotError(
-                'Target channel is not text-based',
+                'Target channel is missing or not text-based',
                 ErrorTypes.VALIDATION,
                 'The channel must be a text channel.',
-                { channelId: targetChannel.id, channelType: targetChannel.type }
+                { channelId: targetChannel?.id, channelType: targetChannel?.type }
             );
         }
 
@@ -122,14 +123,26 @@ export default {
         });
 
         initialGiveawayData.messageId = giveawayMessage.id;
-        const saved = await saveGiveaway(
-            interaction.client,
-            interaction.guildId,
-            initialGiveawayData,
-        );
+        let saved = false;
+        try {
+            saved = await saveGiveaway(
+                interaction.client,
+                interaction.guildId,
+                initialGiveawayData,
+            );
+        } catch (error) {
+            await giveawayMessage.delete().catch(() => {});
+            throw error;
+        }
 
         if (!saved) {
-            logger.warn(`Failed to save giveaway to database: ${giveawayMessage.id}`);
+            await giveawayMessage.delete().catch(() => {});
+            throw new TitanBotError(
+                `Failed to save giveaway to database: ${giveawayMessage.id}`,
+                ErrorTypes.UNKNOWN,
+                'The giveaway could not be saved. Please try again.',
+                { messageId: giveawayMessage.id, guildId: interaction.guildId }
+            );
         }
 
         try {

@@ -11,14 +11,38 @@ import { isBotOwner, getBotMessage } from '../config/bot.js';
  * @returns {bigint | null}
  */
 export function getCommandDefaultPermissions(commandData) {
-  const json = commandData?.toJSON?.() ?? commandData;
+  let json;
+  try {
+    json = commandData?.toJSON?.() ?? commandData;
+  } catch {
+    logger.warn('[PERMISSION] Invalid command payload; treating as admin-only');
+    return 0n;
+  }
+
   const value = json?.default_member_permissions;
 
-  if (value == null || value === '0') {
+  if (value == null) {
     return null;
   }
 
-  return BigInt(value);
+  // Discord uses "0" to hide the command from everyone except admins.
+  // Treat it as a real bitfield, not "no restriction".
+  try {
+    return BigInt(value);
+  } catch {
+    logger.warn('[PERMISSION] Invalid default_member_permissions; treating as admin-only', {
+      value: String(value),
+    });
+    return 0n;
+  }
+}
+
+function memberHasPermissionBits(member, bits) {
+  try {
+    return Boolean(member?.permissions?.has(bits));
+  } catch {
+    return false;
+  }
 }
 
 function normalizeRoleId(role) {
@@ -54,7 +78,7 @@ export function memberHasConfiguredModeratorRole(member, guildConfig) {
 
   const modRoleId = normalizeRoleId(guildConfig.modRole);
 
-  return Boolean(modRoleId && member.roles.cache.has(modRoleId));
+  return Boolean(modRoleId && member.roles?.cache?.has?.(modRoleId));
 }
 
 /**
@@ -73,11 +97,15 @@ export function memberHasModerationCommandAccess(member, guildConfig, requiredPe
     return true;
   }
 
-  if (member.permissions.has(PermissionFlagsBits.Administrator)) {
+  if (memberHasPermissionBits(member, PermissionFlagsBits.Administrator)) {
     return true;
   }
 
-  if (requiredPermissions != null && member.permissions.has(requiredPermissions)) {
+  if (
+    requiredPermissions != null &&
+    requiredPermissions !== 0n &&
+    memberHasPermissionBits(member, requiredPermissions)
+  ) {
     return true;
   }
 
@@ -111,7 +139,16 @@ export function memberMeetsCommandPermissions(member, permissionBitfield, option
     return true;
   }
 
-  return member.permissions.has(permissionBitfield);
+  if (memberHasPermissionBits(member, PermissionFlagsBits.Administrator)) {
+    return true;
+  }
+
+  // "0" means no default member permissions — owner/admin already handled.
+  if (permissionBitfield === 0n) {
+    return false;
+  }
+
+  return memberHasPermissionBits(member, permissionBitfield);
 }
 
 /**
@@ -124,6 +161,10 @@ export async function checkModerationPermissions(
   requiredPermissions,
   errorMessage = 'You do not have permission to use this command.'
 ) {
+  if (!interaction) {
+    return false;
+  }
+
   if (memberHasModerationCommandAccess(interaction.member, guildConfig, requiredPermissions)) {
     return true;
   }
@@ -149,6 +190,10 @@ export async function checkModerationPermissions(
  * @returns {Promise<boolean>} true when the member may proceed
  */
 export async function enforceDefaultCommandPermissions(interaction, command, context = {}) {
+  if (!interaction) {
+    return false;
+  }
+
   if (isBotOwner(interaction.user?.id)) {
     return true;
   }
@@ -189,7 +234,7 @@ export async function enforceDefaultCommandPermissions(interaction, command, con
 
 export function isAdmin(member) {
   if (!member) return false;
-  return member.permissions.has(PermissionFlagsBits.Administrator);
+  return memberHasPermissionBits(member, PermissionFlagsBits.Administrator);
 }
 
 export function isModerator(member, guildConfig = null) {
@@ -197,22 +242,32 @@ export function isModerator(member, guildConfig = null) {
   if (memberHasConfiguredModeratorRole(member, guildConfig)) {
     return true;
   }
-  return member.permissions.has([
-    PermissionFlagsBits.Administrator,
-    PermissionFlagsBits.ManageGuild
-  ]);
+  return (
+    memberHasPermissionBits(member, PermissionFlagsBits.Administrator) ||
+    memberHasPermissionBits(member, PermissionFlagsBits.ManageGuild)
+  );
 }
 
 export function hasPermission(member, permissions) {
-  if (!member) return false;
-  return member.permissions.has(permissions);
+  if (!member?.permissions) return false;
+  try {
+    return member.permissions.has(permissions);
+  } catch {
+    return false;
+  }
 }
 
 export function botHasPermission(channel, permissions) {
   if (!channel || !channel.guild) return false;
-  const botMember = channel.guild.members.me;
+  const botMember = channel.guild.members?.me;
   if (!botMember) return false;
-  return channel.permissionsFor(botMember).has(permissions);
+  const channelPermissions = channel.permissionsFor?.(botMember);
+  if (!channelPermissions) return false;
+  try {
+    return channelPermissions.has(permissions);
+  } catch {
+    return false;
+  }
 }
 
 export async function checkUserPermissions(
@@ -220,9 +275,37 @@ export async function checkUserPermissions(
   requiredPermissions,
   errorMessage = 'You do not have permission to use this command.'
 ) {
+  if (!interaction) {
+    return false;
+  }
+
   const member = interaction.member;
 
-  if (!member.permissions.has(requiredPermissions)) {
+  if (!member) {
+    await replyUserError(interaction, {
+      type: ErrorTypes.PERMISSION,
+      message: errorMessage,
+      context: { source: 'permissionGuard.checkUserPermissions' }
+    });
+    return false;
+  }
+
+  const isOwner = member.guild?.ownerId === member.id;
+  let isAdministrator = false;
+  let hasRequired = false;
+  try {
+    isAdministrator = Boolean(member.permissions?.has(PermissionFlagsBits.Administrator));
+    hasRequired = Boolean(member.permissions?.has(requiredPermissions));
+  } catch {
+    isAdministrator = false;
+    hasRequired = false;
+  }
+
+  const allowed = requiredPermissions === 0n
+    ? isOwner || isAdministrator
+    : hasRequired;
+
+  if (!allowed) {
     await replyUserError(interaction, {
       type: ErrorTypes.PERMISSION,
       message: errorMessage,
@@ -243,7 +326,11 @@ export async function checkBotPermissions(
   requiredPermissions,
   channel = null
 ) {
-  const targetChannel = channel || interaction.channel;
+  if (!interaction && !channel) {
+    return false;
+  }
+
+  const targetChannel = channel || interaction?.channel;
 
   if (!targetChannel || !targetChannel.guild) {
     await replyUserError(interaction, {
@@ -254,7 +341,7 @@ export async function checkBotPermissions(
     return false;
   }
 
-  const botMember = targetChannel.guild.members.me;
+  const botMember = targetChannel.guild.members?.me;
   if (!botMember) {
     await replyUserError(interaction, {
       type: ErrorTypes.UNKNOWN,
@@ -264,12 +351,25 @@ export async function checkBotPermissions(
     return false;
   }
 
-  const permissions = targetChannel.permissionsFor(botMember);
+  const permissions = targetChannel.permissionsFor?.(botMember);
+  if (!permissions) {
+    await replyUserError(interaction, {
+      type: ErrorTypes.PERMISSION,
+      message: `I could not read my permissions in ${targetChannel}.`,
+      context: { source: 'permissionGuard.checkBotPermissions', subtype: 'bot_permission' }
+    });
+    return false;
+  }
+
   const missingPerms = [];
 
   const permArray = Array.isArray(requiredPermissions) ? requiredPermissions : [requiredPermissions];
   for (const perm of permArray) {
-    if (!permissions.has(perm)) {
+    try {
+      if (!permissions.has(perm)) {
+        missingPerms.push(perm);
+      }
+    } catch {
       missingPerms.push(perm);
     }
   }
@@ -291,10 +391,10 @@ export async function checkBotPermissions(
 }
 
 function hashUserId(userId) {
-
+  const id = userId == null ? '' : String(userId);
   let hash = 0;
-  for (let i = 0; i < userId.length; i++) {
-    const char = userId.charCodeAt(i);
+  for (let i = 0; i < id.length; i++) {
+    const char = id.charCodeAt(i);
     hash = ((hash << 5) - hash) + char;
     hash = hash & hash;
   }

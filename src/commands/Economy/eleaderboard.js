@@ -21,6 +21,14 @@ export default {
 
             const prefix = getEconomyPrefix(guildId);
 
+            if (!client?.db?.list || !client?.db?.get) {
+                throw createError(
+                    "Economy storage is not available",
+                    ErrorTypes.DATABASE,
+                    "Economy data is not available right now."
+                );
+            }
+
             let allKeys = await client.db.list(prefix);
 
             if (!Array.isArray(allKeys)) {

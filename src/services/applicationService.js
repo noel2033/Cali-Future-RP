@@ -3,6 +3,7 @@
 import { logger } from '../utils/logger.js';
 import { createError, ErrorTypes } from '../utils/errorHandler.js';
 import { PermissionFlagsBits } from 'discord.js';
+import { hasPermission } from '../utils/permissionGuard.js';
 import { sanitizeInput, sanitizeMarkdown } from '../utils/validation.js';
 import {
     getApplicationSettings,
@@ -18,6 +19,7 @@ import {
 import botConfig from '../config/bot.js';
 
 const applicationCooldowns = new Map();
+const applicationInFlight = new Set();
 const APPLICATION_SUBMIT_COOLDOWN = (botConfig.applications?.applicationCooldown ?? 24) * 60 * 60 * 1000;
 
 class ApplicationService {
@@ -94,24 +96,27 @@ class ApplicationService {
             );
         }
 
-        applicationCooldowns.set(cooldownKey, now);
         return true;
+    }
+
+    static markApplicationCooldown(userId) {
+        applicationCooldowns.set(`submit_${userId}`, Date.now());
     }
 
     static async checkManagerPermission(client, guildId, member) {
         const settings = await getApplicationSettings(client, guildId);
-        
-        const isManager = 
-            member.permissions.has(PermissionFlagsBits.ManageGuild) ||
-            (settings.managerRoles && 
-             settings.managerRoles.some(roleId => member.roles.cache.has(roleId)));
+
+        const isManager =
+            hasPermission(member, PermissionFlagsBits.ManageGuild) ||
+            (Array.isArray(settings.managerRoles) &&
+             settings.managerRoles.some(roleId => member?.roles?.cache?.has(roleId)));
 
         if (!isManager) {
             throw createError(
                 'User lacks permission to manage applications',
                 ErrorTypes.PERMISSION,
                 'You do not have permission to manage applications.',
-                { userId: member.id, guildId }
+                { userId: member?.id, guildId }
             );
         }
 
@@ -124,7 +129,17 @@ class ApplicationService {
             this.validateApplicationSubmission(data);
 
             this.checkApplicationCooldown(data.userId);
+            if (applicationInFlight.has(data.userId)) {
+                throw createError(
+                    'Application submission already in progress',
+                    ErrorTypes.RATE_LIMIT,
+                    'Please wait for your current application submission to finish.',
+                    { userId: data.userId }
+                );
+            }
+            applicationInFlight.add(data.userId);
 
+            try {
             const settings = await getApplicationSettings(client, data.guildId);
             if (!settings.enabled) {
                 throw createError(
@@ -156,6 +171,7 @@ class ApplicationService {
             };
 
             const application = await createApplication(client, sanitizedData);
+            this.markApplicationCooldown(data.userId);
 
             logger.info('Application submitted', {
                 applicationId: application.id,
@@ -166,6 +182,9 @@ class ApplicationService {
             });
 
             return application;
+            } finally {
+                applicationInFlight.delete(data.userId);
+            }
         } catch (error) {
             logger.error('Error submitting application', {
                 error: error.message,

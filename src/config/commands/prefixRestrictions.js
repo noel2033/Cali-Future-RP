@@ -2,6 +2,8 @@
  * Prefix command restrictions — dashboard and advanced setup flows stay slash-only.
  */
 
+import { getCommandJson, getCommandOptions } from '../../utils/commandJson.js';
+
 /** Top-level commands that cannot be invoked via prefix at all. */
 export const SLASH_ONLY_COMMANDS = new Set([
   'configwizard',
@@ -38,17 +40,18 @@ export const COMMAND_BLOCKED_SUBCOMMANDS = {
 };
 
 function collectSubcommandNames(commandJson) {
-  const subcommandGroup = commandJson.options?.find((opt) => opt.type === 2);
+  const options = getCommandOptions(commandJson);
+  const subcommandGroup = options.find((opt) => opt.type === 2);
 
   if (subcommandGroup) {
     const names = [];
-    for (const group of subcommandGroup.options || []) {
-      names.push(...(group.options?.map((opt) => opt.name) || []));
+    for (const group of getCommandOptions(subcommandGroup)) {
+      names.push(...getCommandOptions(group).map((opt) => opt.name));
     }
     return names;
   }
 
-  return (commandJson.options?.filter((opt) => opt.type === 1) || []).map((sub) => sub.name);
+  return options.filter((opt) => opt.type === 1).map((sub) => sub.name);
 }
 
 function isSubcommandBlocked(commandName, subcommandName) {
@@ -76,8 +79,8 @@ export function getPrefixRestriction(command, args, resolveSubcommandAlias) {
     return { blocked: false };
   }
 
-  const commandJson = command.data.toJSON();
-  const commandName = commandJson.name?.toLowerCase();
+  const commandJson = getCommandJson(command.data);
+  const commandName = commandJson?.name?.toLowerCase();
 
   if (command.prefixOnly === false || command.slashOnly === true) {
     return { blocked: true, reason: 'This command is only available as a slash command.' };
@@ -87,11 +90,13 @@ export function getPrefixRestriction(command, args, resolveSubcommandAlias) {
     return { blocked: true, reason: 'This command is only available as a slash command.' };
   }
 
-  const [firstArg, secondArg] = args.map((arg) => arg?.toLowerCase?.() || null);
-  const resolvedFirstArg = firstArg ? resolveSubcommandAlias(firstArg) : null;
-  const resolvedSecondArg = secondArg ? resolveSubcommandAlias(secondArg) : null;
+  const argv = Array.isArray(args) ? args : [];
+  const [firstArg, secondArg] = argv.map((arg) => arg?.toLowerCase?.() || null);
+  const resolveAlias = typeof resolveSubcommandAlias === 'function' ? resolveSubcommandAlias : (name) => name;
+  const resolvedFirstArg = firstArg ? resolveAlias(firstArg) : null;
+  const resolvedSecondArg = secondArg ? resolveAlias(secondArg) : null;
 
-  const subcommandGroup = commandJson.options?.find((opt) => opt.type === 2);
+  const subcommandGroup = getCommandOptions(commandJson).find((opt) => opt.type === 2);
 
   const allSubcommandNames = collectSubcommandNames(commandJson);
   const allSubcommandsBlocked =

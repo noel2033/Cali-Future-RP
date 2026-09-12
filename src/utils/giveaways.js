@@ -4,6 +4,8 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { logger } from './logger.js';
 import { TitanBotError, ErrorTypes } from './errorHandler.js';
 import { unwrapReplitData } from './database.js';
+import { Mutex } from './mutex.js';
+import { toEpochMs } from './database/timestamps.js';
 import { 
     createGiveawayEmbed as createGiveawayEmbedService,
     createGiveawayButtons as createGiveawayButtonsService,
@@ -28,7 +30,7 @@ function arrayToGiveawayMap(giveaways) {
 
 export async function getGuildGiveaways(client, guildId) {
     try {
-        if (!client.db) {
+        if (!client?.db) {
             logger.warn('Database not available for getGuildGiveaways');
             return [];
         }
@@ -49,7 +51,7 @@ export async function getGuildGiveaways(client, guildId) {
 
 export async function saveGiveaway(client, guildId, giveawayData) {
     try {
-        if (!client.db) {
+        if (!client?.db) {
             logger.warn('Database not available for saveGiveaway');
             return false;
         }
@@ -64,15 +66,29 @@ export async function saveGiveaway(client, guildId, giveawayData) {
         }
 
         const key = giveawayKey(guildId);
-        const giveaways = await getGuildGiveaways(client, guildId);
+        return await Mutex.runExclusive(`giveaway-guild:${guildId}`, async () => {
+            const giveaways = await getGuildGiveaways(client, guildId);
+            const giveawayMap = arrayToGiveawayMap(giveaways);
+            const existing = giveawayMap[giveawayData.messageId];
+            const existingEnded = Boolean(
+                existing && (existing.ended || existing.isEnded || isGiveawayEnded(existing)),
+            );
+            const incomingEnded = Boolean(giveawayData.ended || giveawayData.isEnded);
 
-        const giveawayMap = arrayToGiveawayMap(giveaways);
-        giveawayMap[giveawayData.messageId] = giveawayData;
-        
-        await client.db.set(key, giveawayMap);
-        
-        logger.debug(`Saved giveaway ${giveawayData.messageId} in guild ${guildId}`);
-        return true;
+            if (existingEnded && !incomingEnded) {
+                throw new TitanBotError(
+                    'Refusing to overwrite ended giveaway with an active snapshot',
+                    ErrorTypes.VALIDATION,
+                    'This giveaway has already ended.',
+                    { messageId: giveawayData.messageId, guildId },
+                );
+            }
+
+            giveawayMap[giveawayData.messageId] = giveawayData;
+            await client.db.set(key, giveawayMap);
+            logger.debug(`Saved giveaway ${giveawayData.messageId} in guild ${guildId}`);
+            return true;
+        });
     } catch (error) {
         logger.error(`Error saving giveaway in guild ${guildId}:`, error);
         if (error instanceof TitanBotError) {
@@ -84,7 +100,7 @@ export async function saveGiveaway(client, guildId, giveawayData) {
 
 export async function deleteGiveaway(client, guildId, messageId) {
     try {
-        if (!client.db) {
+        if (!client?.db) {
             logger.warn('Database not available for deleteGiveaway');
             return false;
         }
@@ -99,20 +115,20 @@ export async function deleteGiveaway(client, guildId, messageId) {
         }
 
         const key = giveawayKey(guildId);
-        const giveaways = await getGuildGiveaways(client, guildId);
+        return await Mutex.runExclusive(`giveaway-guild:${guildId}`, async () => {
+            const giveaways = await getGuildGiveaways(client, guildId);
+            const giveawayMap = arrayToGiveawayMap(giveaways);
 
-        const giveawayMap = arrayToGiveawayMap(giveaways);
-        
-        if (!giveawayMap[messageId]) {
-            logger.debug(`Giveaway not found for deletion: ${messageId} in guild ${guildId}`);
-            return false;
-        }
-        
-        delete giveawayMap[messageId];
-        await client.db.set(key, giveawayMap);
-        
-        logger.debug(`Deleted giveaway ${messageId} from guild ${guildId}`);
-        return true;
+            if (!giveawayMap[messageId]) {
+                logger.debug(`Giveaway not found for deletion: ${messageId} in guild ${guildId}`);
+                return false;
+            }
+
+            delete giveawayMap[messageId];
+            await client.db.set(key, giveawayMap);
+            logger.debug(`Deleted giveaway ${messageId} from guild ${guildId}`);
+            return true;
+        });
     } catch (error) {
         logger.error(`Error deleting giveaway ${messageId} in guild ${guildId}:`, error);
         if (error instanceof TitanBotError) {
@@ -131,10 +147,17 @@ export function createGiveawayEmbed(giveaway, status, winners = []) {
     }
 }
 
+export function getGiveawayParticipants(giveaway) {
+    return Array.isArray(giveaway?.participants) ? giveaway.participants : [];
+}
+
 export function isGiveawayEnded(giveaway) {
     if (!giveaway) return true;
+    if (giveaway.ended || giveaway.isEnded) return true;
     const endTime = giveaway.endsAt || giveaway.endTime;
-    return Date.now() > endTime;
+    const endMs = toEpochMs(endTime, Number.NaN);
+    if (!Number.isFinite(endMs)) return true;
+    return Date.now() > endMs;
 }
 
 export function pickWinners(entrants, count) {
@@ -143,7 +166,7 @@ export function pickWinners(entrants, count) {
     } catch (error) {
         logger.error('Error picking winners:', error);
         
-        if (!entrants || entrants.length === 0) return [];
+        if (!Array.isArray(entrants) || entrants.length === 0) return [];
         const requested = Math.min(count, entrants.length);
         const shuffled = [...entrants];
         for (let i = shuffled.length - 1; i > 0; i--) {

@@ -5,6 +5,7 @@ import { InteractionHelper } from '../../../utils/interactionHelper.js';
 import { logger } from '../../../utils/logger.js';
 
 import { replyUserError, ErrorTypes } from '../../../utils/errorHandler.js';
+import { hasPermission, botHasPermission } from '../../../utils/permissionGuard.js';
 const DESTINATION_LABELS = {
   audit: 'Audit Log',
   applications: 'Applications',
@@ -15,7 +16,7 @@ export default {
   prefixOnly: false,
   async execute(interaction, config, client) {
     try {
-      if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+      if (!hasPermission(interaction.member, PermissionsBitField.Flags.ManageGuild)) {
         return await replyUserError(interaction, { type: ErrorTypes.PERMISSION, message: 'You need **Manage Server** permissions to configure logging channels.' });
       }
 
@@ -39,8 +40,7 @@ export default {
         return await replyUserError(interaction, { type: ErrorTypes.VALIDATION, message: 'Please provide a valid text channel.' });
       }
 
-      const botPerms = channel.permissionsFor(interaction.guild.members.me);
-      if (!botPerms?.has(['ViewChannel', 'SendMessages', 'EmbedLinks'])) {
+      if (!botHasPermission(channel, ['ViewChannel', 'SendMessages', 'EmbedLinks'])) {
         return await replyUserError(interaction, { type: ErrorTypes.PERMISSION, message: `I need **View Channel**, **Send Messages**, and **Embed Links** in ${channel}.` });
       }
 

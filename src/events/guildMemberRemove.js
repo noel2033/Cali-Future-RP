@@ -7,6 +7,7 @@ import { getServerCounters, updateCounter } from '../services/serverstatsService
 import { getGuildBirthdays, deleteBirthday } from '../utils/database.js';
 import { deleteUserLevelData } from '../services/leveling/leveling.js';
 import { logger } from '../utils/logger.js';
+import { botHasPermission } from '../utils/permissionGuard.js';
 
 export default {
   name: Events.GuildMemberRemove,
@@ -21,13 +22,9 @@ export default {
         const goodbyeChannelId = welcomeConfig?.goodbyeChannelId;
 
         if (welcomeConfig?.goodbyeEnabled && goodbyeChannelId) {
+            try {
             const channel = guild.channels.cache.get(goodbyeChannelId);
-            if (channel?.isTextBased?.()) {
-                const me = guild.members.me;
-                const permissions = me ? channel.permissionsFor(me) : null;
-                if (!permissions?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages])) {
-                    return;
-                }
+            if (channel?.isTextBased?.() && botHasPermission(channel, [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages])) {
 
                 const formatData = { user, guild, member };
                 const goodbyeMessage = formatWelcomeMessage(
@@ -43,7 +40,7 @@ export default {
                     ? formatWelcomeMessage(welcomeConfig.leaveEmbed.footer, formatData)
                     : `Goodbye from ${guild.name}!`;
 
-                const canEmbed = permissions.has(PermissionFlagsBits.EmbedLinks);
+                const canEmbed = botHasPermission(channel, PermissionFlagsBits.EmbedLinks);
 
                 if (!canEmbed) {
                     await channel.send({
@@ -75,6 +72,9 @@ export default {
                         embeds: [embed]
                     });
                 }
+            }
+            } catch (error) {
+                logger.warn('Failed to send goodbye message:', error);
             }
         }
 

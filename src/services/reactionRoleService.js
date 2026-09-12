@@ -50,14 +50,19 @@ function validateRoleId(roleId) {
 }
 
 export function hasDangerousPermissions(role) {
-    if (!role || !role.permissions) return false;
-    
-    for (const permission of DANGEROUS_PERMISSIONS) {
-        if (role.permissions.has(permission)) {
-            return true;
+    if (!role) return false;
+    if (!role.permissions) return true;
+
+    try {
+        for (const permission of DANGEROUS_PERMISSIONS) {
+            if (role.permissions.has(permission)) {
+                return true;
+            }
         }
+        return false;
+    } catch {
+        return true;
     }
-    return false;
 }
 
 async function validateRoleSafety(client, guildId, roleId) {
@@ -308,9 +313,9 @@ export async function getAllReactionRoleMessages(client, guildId) {
                     const allKeys = await client.db.list();
                     
                     if (Array.isArray(allKeys)) {
-                        keys = allKeys.filter(key => key.startsWith(prefix));
+                        keys = allKeys.filter(key => typeof key === 'string' && key.startsWith(prefix));
                     } else if (allKeys.value && Array.isArray(allKeys.value)) {
-                        keys = allKeys.value.filter(key => key.startsWith(prefix));
+                        keys = allKeys.value.filter(key => typeof key === 'string' && key.startsWith(prefix));
                     } else {
                         return [];
                     }
@@ -328,13 +333,16 @@ export async function getAllReactionRoleMessages(client, guildId) {
             );
         }
         
-        if (!keys || keys.length === 0) {
+        if (!Array.isArray(keys) || keys.length === 0) {
             return [];
         }
 
         const messages = [];
         
         for (const key of keys) {
+            if (typeof key !== 'string') {
+                continue;
+            }
             try {
                 const data = await client.db.get(key);
                 

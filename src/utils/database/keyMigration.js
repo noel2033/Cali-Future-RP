@@ -1,6 +1,7 @@
 import { pgConfig } from '../../config/database/postgres.js';
 import { canonicalizeKey } from './keys.js';
 import { parseKey } from './keyParser.js';
+import { toDate, toPgInt } from './timestamps.js';
 
 /**
  * Marker version for the key-canonicalization migration. Bump this only if a new
@@ -60,30 +61,13 @@ async function ensureParentRows(client, guildId, userId) {
     }
 }
 
-function resolveTimestampValue(input, fallback = new Date()) {
-    if (input instanceof Date && !Number.isNaN(input.getTime())) {
-        return input;
-    }
-
-    if (typeof input === 'string' && /^[0-9]+$/.test(input)) {
-        const timestamp = new Date(Number(input));
-        return Number.isNaN(timestamp.getTime()) ? fallback : timestamp;
-    }
-
-    if (typeof input === 'number' && Number.isFinite(input)) {
-        const timestamp = new Date(input);
-        return Number.isNaN(timestamp.getTime()) ? fallback : timestamp;
-    }
-
-    const parsedDate = new Date(input);
-    return !Number.isNaN(parsedDate.getTime()) ? parsedDate : fallback;
-}
-
 async function migrateEconomyFromTemp(client, legacyKey, value) {
     const parsed = parseKey(canonicalizeKey(legacyKey));
-    const payload = typeof value === 'string' ? JSON.parse(value) : value;
-    const wallet = payload?.wallet ?? payload?.balance ?? 0;
-    const bank = payload?.bank ?? 0;
+    const parsedValue = typeof value === 'string' ? JSON.parse(value) : value;
+    const payload = parsedValue && typeof parsedValue === 'object' && !Array.isArray(parsedValue) ? parsedValue : {};
+    const wallet = toPgInt(payload.wallet ?? payload.balance);
+    const bank = toPgInt(payload.bank);
+    const storedPayload = { ...payload, wallet, bank, balance: wallet };
 
     await ensureParentRows(client, parsed.guildId, parsed.userId);
     await client.query(
@@ -94,7 +78,7 @@ async function migrateEconomyFromTemp(client, legacyKey, value) {
            bank = EXCLUDED.bank,
            data = EXCLUDED.data,
            updated_at = CURRENT_TIMESTAMP`,
-        [parsed.guildId, parsed.userId, wallet, bank, JSON.stringify(payload ?? {})],
+        [parsed.guildId, parsed.userId, wallet, bank, JSON.stringify(storedPayload)],
     );
 }
 
@@ -118,11 +102,11 @@ async function migrateUserLevelFromTemp(client, legacyKey, value) {
         [
             parsed.guildId,
             parsed.userId,
-            Number(payload?.xp) || 0,
-            Number(payload?.level) || 0,
-            Number(payload?.totalXp ?? payload?.total_xp) || 0,
-            resolveTimestampValue(lastMessageValue),
-            Number(payload?.rank) || 0,
+            toPgInt(payload?.xp),
+            Math.min(toPgInt(payload?.level), 1000),
+            toPgInt(payload?.totalXp ?? payload?.total_xp),
+            toDate(lastMessageValue),
+            toPgInt(payload?.rank),
         ],
     );
 }

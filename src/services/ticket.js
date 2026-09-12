@@ -16,6 +16,7 @@ import { createEmbed, errorEmbed } from '../utils/embeds.js';
 import { logTicketEvent } from '../utils/ticket/ticketLogging.js';
 import { createError, ErrorTypes } from '../utils/errorHandler.js';
 import { ensureTypedServiceError, wrapServiceBoundary } from '../utils/serviceErrorBoundary.js';
+import { hasPermission } from '../utils/permissionGuard.js';
 import { PRIORITY_MAP } from '../utils/helpers.js';
 const TICKET_DELETE_DELAY_MS = 3000;
 const TICKET_DELETE_DELAY_SECONDS = Math.floor(TICKET_DELETE_DELAY_MS / 1000);
@@ -81,6 +82,14 @@ export const getUserTicketCount = wrapServiceBoundary(async function getUserTick
 
 export async function createTicket(guild, member, categoryId, reason = 'No reason provided', priority = 'none') {
   try {
+    if (!guild || !member) {
+      ticketUserError(
+        'Missing guild or member',
+        'Could not identify the server or member for this ticket.',
+        ErrorTypes.VALIDATION,
+        { guildId: guild?.id, userId: member?.id, operation: 'createTicket' }
+      );
+    }
     const config = await getGuildConfig(guild.client, guild.id);
     const ticketConfig = config.tickets || {};
     
@@ -100,7 +109,7 @@ export async function createTicket(guild, member, categoryId, reason = 'No reaso
       guild.channels.cache.get(categoryId) :
       guild.channels.cache.find(c => 
         c.type === ChannelType.GuildCategory && 
-        c.name.toLowerCase().includes('tickets')
+        c.name?.toLowerCase().includes('tickets')
       );
     
     if (!category && !categoryId) {
@@ -239,7 +248,16 @@ export async function createTicket(guild, member, categoryId, reason = 'No reaso
 export async function closeTicket(channel, closer, reason = 'No reason provided') {
   try {
     const ticketData = requireTicket(await getTicketData(channel.guild.id, channel.id), channel);
-    
+
+    if (!closer) {
+      ticketUserError(
+        'Missing closer',
+        'Could not identify who is closing this ticket.',
+        ErrorTypes.VALIDATION,
+        { channelId: channel.id, operation: 'closeTicket' }
+      );
+    }
+
     const config = await getGuildConfig(channel.client, channel.guild.id);
     const dmOnClose = config.dmOnClose !== false;
     const closedCategoryId = config.ticketClosedCategoryId || null;
@@ -345,8 +363,7 @@ export async function closeTicket(channel, closer, reason = 'No reason provided'
     
     const messages = await channel.messages.fetch();
     const ticketMessage = messages.find(m => 
-      m.embeds.length > 0 && 
-      m.embeds[0].title?.startsWith('Ticket #')
+      m.embeds?.[0]?.title?.startsWith('Ticket #')
     );
     
     if (ticketMessage) {
@@ -365,9 +382,9 @@ export async function closeTicket(channel, closer, reason = 'No reason provided'
         footer: embed.footer
       });
       
-      await ticketMessage.edit({ 
+      await ticketMessage.edit({
         embeds: [updatedEmbed],
-components: []
+        components: []
       });
     }
     
@@ -421,6 +438,15 @@ components: []
 export async function claimTicket(channel, claimer) {
   try {
     const ticketData = requireTicket(await getTicketData(channel.guild.id, channel.id), channel);
+
+    if (!claimer) {
+      ticketUserError(
+        'Missing claimer',
+        'Could not identify who is claiming this ticket.',
+        ErrorTypes.VALIDATION,
+        { channelId: channel.id, operation: 'claimTicket' }
+      );
+    }
     
     if (ticketData.claimedBy) {
       ticketUserError(
@@ -438,8 +464,7 @@ export async function claimTicket(channel, claimer) {
     
     const messages = await channel.messages.fetch();
     const ticketMessage = messages.find(m => 
-      m.embeds.length > 0 && 
-      m.embeds[0].title?.startsWith('Ticket #')
+      m.embeds?.[0]?.title?.startsWith('Ticket #')
     );
     
     if (ticketMessage) {
@@ -473,8 +498,7 @@ export async function claimTicket(channel, claimer) {
     );
 
     const claimStatusMessage = messages.find(m =>
-      m.embeds.length > 0 &&
-      (m.embeds[0].title === 'Ticket Claimed' || m.embeds[0].title === 'Ticket Unclaimed')
+      m.embeds?.[0]?.title === 'Ticket Claimed' || m.embeds?.[0]?.title === 'Ticket Unclaimed'
     );
 
     if (claimStatusMessage) {
@@ -508,6 +532,15 @@ export async function claimTicket(channel, claimer) {
 export async function reopenTicket(channel, reopener) {
   try {
     const ticketData = requireTicket(await getTicketData(channel.guild.id, channel.id), channel);
+
+    if (!reopener) {
+      ticketUserError(
+        'Missing reopener',
+        'Could not identify who is reopening this ticket.',
+        ErrorTypes.VALIDATION,
+        { channelId: channel.id, operation: 'reopenTicket' }
+      );
+    }
     
     if (ticketData.status !== 'closed') {
       ticketUserError(
@@ -564,8 +597,7 @@ export async function reopenTicket(channel, reopener) {
     
     const messages = await channel.messages.fetch();
     const ticketMessage = messages.find(m => 
-      m.embeds.length > 0 && 
-      m.embeds[0].title?.startsWith('Ticket #')
+      m.embeds?.[0]?.title?.startsWith('Ticket #')
     );
     
     if (ticketMessage) {
@@ -591,10 +623,8 @@ export async function reopenTicket(channel, reopener) {
     });
 
     const closeStatusMessage = messages.find(m =>
-      m.embeds.length > 0 &&
-      m.embeds[0].title === 'Ticket Closed' &&
-      m.components.length > 0 &&
-      m.components[0].components.some(c => c.customId === 'ticket_reopen')
+      m.embeds?.[0]?.title === 'Ticket Closed' &&
+      m.components?.[0]?.components?.some(c => c.customId === 'ticket_reopen')
     );
 
     if (closeStatusMessage) {
@@ -649,7 +679,7 @@ async function generateTranscript(channel) {
     const rows = messages.map((msg) => {
       const ts = new Date(msg.createdTimestamp).toISOString().replace('T', ' ').slice(0, 19);
       const author = escape(msg.author?.tag ?? msg.author?.username ?? 'Unknown');
-      const content = escape(msg.content || (msg.embeds.length ? '[embed]' : '[attachment]'));
+      const content = escape(msg.content || (msg.embeds?.length ? '[embed]' : '[attachment]'));
       return `<tr><td class="ts">${ts}</td><td class="author">${author}</td><td class="msg">${content}</td></tr>`;
     }).join('\n');
 
@@ -708,6 +738,15 @@ ${rows}
 export async function deleteTicket(channel, deleter) {
   try {
     const ticketData = requireTicket(await getTicketData(channel.guild.id, channel.id), channel);
+
+    if (!deleter) {
+      ticketUserError(
+        'Missing deleter',
+        'Could not identify who is deleting this ticket.',
+        ErrorTypes.VALIDATION,
+        { channelId: channel.id, operation: 'deleteTicket' }
+      );
+    }
     
     const deleteEmbed = createEmbed({
       title: 'Ticket Deleted',
@@ -869,7 +908,7 @@ export async function unclaimTicket(channel, unclaimer) {
       );
     }
     
-    if (ticketData.claimedBy !== unclaimer.id && !unclaimer.permissions.has(PermissionFlagsBits.ManageChannels)) {
+    if (!unclaimer || (ticketData.claimedBy !== unclaimer.id && !hasPermission(unclaimer, PermissionFlagsBits.ManageChannels))) {
       ticketUserError(
         'Cannot unclaim ticket',
         'You can only unclaim your own tickets or need Manage Channels permission.',
@@ -886,8 +925,7 @@ export async function unclaimTicket(channel, unclaimer) {
     
     const messages = await channel.messages.fetch();
     const ticketMessage = messages.find(m => 
-      m.embeds.length > 0 && 
-      m.embeds[0].title?.startsWith('Ticket #')
+      m.embeds?.[0]?.title?.startsWith('Ticket #')
     );
     
     if (ticketMessage) {
@@ -907,8 +945,7 @@ export async function unclaimTicket(channel, unclaimer) {
     }
     
     const claimMessage = messages.find(m => 
-      m.embeds.length > 0 && 
-      (m.embeds[0].title === 'Ticket Claimed' || m.embeds[0].title === 'Ticket Unclaimed')
+      m.embeds?.[0]?.title === 'Ticket Claimed' || m.embeds?.[0]?.title === 'Ticket Unclaimed'
     );
     
     if (claimMessage) {
@@ -961,6 +998,15 @@ async function getNextTicketNumber(guildId) {
 export async function updateTicketPriority(channel, priority, updater) {
   try {
     const ticketData = requireTicket(await getTicketData(channel.guild.id, channel.id), channel);
+
+    if (!updater) {
+      ticketUserError(
+        'Missing updater',
+        'Could not identify who is updating this ticket.',
+        ErrorTypes.VALIDATION,
+        { channelId: channel.id, operation: 'updateTicketPriority' }
+      );
+    }
     
     const priorityInfo = PRIORITY_MAP[priority];
     if (!priorityInfo) {
@@ -996,8 +1042,7 @@ export async function updateTicketPriority(channel, priority, updater) {
     
     const messages = await channel.messages.fetch();
     const ticketMessage = messages.find(m => 
-      m.embeds.length > 0 && 
-      m.embeds[0].title?.startsWith('Ticket #')
+      m.embeds?.[0]?.title?.startsWith('Ticket #')
     );
     
     if (ticketMessage) {

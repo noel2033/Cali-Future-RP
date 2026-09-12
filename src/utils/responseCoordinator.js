@@ -2,14 +2,11 @@
 
 import { buildUserErrorEmbed } from './embeds.js';
 import { logger } from './logger.js';
-
-function getCommandJson(commandData) {
-  return commandData?.toJSON ? commandData.toJSON() : commandData;
-}
+import { getCommandJson, getCommandOptions } from './commandJson.js';
 
 export function buildPrefixUsage(prefix, commandData, validation) {
-  const commandJson = getCommandJson(commandData);
-  const usageParts = [`${prefix}${commandJson.name}`];
+  const commandJson = getCommandJson(commandData) || {};
+  const usageParts = [`${prefix}${commandJson.name || 'command'}`];
 
   if (validation.subcommandGroupName) {
     usageParts.push(validation.subcommandGroupName);
@@ -17,7 +14,7 @@ export function buildPrefixUsage(prefix, commandData, validation) {
 
   if (validation.subcommandName) {
     usageParts.push(validation.subcommandName);
-  } else if (!validation.subcommandGroupName && commandJson.options?.some((opt) => opt.type === 1)) {
+  } else if (!validation.subcommandGroupName && getCommandOptions(commandJson).some((opt) => opt.type === 1)) {
     usageParts.push('[subcommand]');
   }
 

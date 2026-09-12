@@ -5,6 +5,7 @@ import { getGuildConfig, setGuildConfig } from './guildConfig.js';
 import { PermissionFlagsBits } from 'discord.js';
 import { createError, ErrorTypes } from '../../utils/errorHandler.js';
 import { wrapServiceClassMethods } from '../../utils/serviceErrorBoundary.js';
+import { hasPermission } from '../../utils/permissionGuard.js';
 import { z } from 'zod';
 import { LogIgnoreSchema, LoggingConfigSchema } from '../../utils/schemas.js';
 
@@ -608,10 +609,10 @@ class ConfigService {
     }
 
     static verifyPermission(member) {
-        return member.permissions.has([
-            PermissionFlagsBits.Administrator,
-            PermissionFlagsBits.ManageGuild
-        ]);
+        return (
+            hasPermission(member, PermissionFlagsBits.Administrator) ||
+            hasPermission(member, PermissionFlagsBits.ManageGuild)
+        );
     }
 }
 

@@ -15,7 +15,7 @@ import pg from 'pg';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { resolveSslConfig } from '../src/config/database/postgres.js';
+import { resolveSslConfig, requireConfiguredPostgresUrl } from '../src/config/database/postgres.js';
 import { runKeyMigration } from '../src/utils/database/keyMigration.js';
 import { logger } from '../src/utils/logger.js';
 
@@ -27,8 +27,16 @@ const dryRun = process.argv.includes('--dry-run');
 const force = process.argv.includes('--force');
 
 async function run() {
+    let postgresUrl;
+    try {
+        postgresUrl = requireConfiguredPostgresUrl();
+    } catch (error) {
+        logger.error(error.message);
+        process.exit(1);
+    }
+
     const pool = new Pool({
-        connectionString: process.env.POSTGRES_URL || process.env.DATABASE_URL,
+        connectionString: postgresUrl,
         ssl: resolveSslConfig(),
     });
 

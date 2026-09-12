@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import pg from 'pg';
 import { logger } from '../src/utils/logger.js';
+import { requireConfiguredPostgresUrl } from '../src/config/database/postgres.js';
+import { redactDatabaseSecrets } from '../src/utils/database/redactUrl.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
@@ -65,7 +67,7 @@ function runCommand(command, args) {
   });
 
   if (result.status !== 0) {
-    throw new Error(`${command} failed: ${result.stderr || result.stdout || 'Unknown error'}`);
+    throw new Error(`${command} failed: ${redactDatabaseSecrets(result.stderr || result.stdout || 'Unknown error')}`);
   }
 
   return result.stdout;
@@ -100,10 +102,7 @@ function buildDatabaseUrlWithName(databaseUrl, databaseName) {
 
 async function run() {
   const args = parseArgs(process.argv.slice(2));
-  const sourceDatabaseUrl = process.env.POSTGRES_URL;
-  if (!sourceDatabaseUrl) {
-    throw new Error('Missing required environment variable: POSTGRES_URL');
-  }
+  const sourceDatabaseUrl = requireConfiguredPostgresUrl();
 
   const keepDrillDatabase = args['keep-db'] === true || args['keep-db'] === 'true';
   const retentionDays = Number.parseInt(args['retention-days'] || process.env.BACKUP_RETENTION_DAYS || '14', 10);
@@ -202,7 +201,7 @@ async function run() {
 run().catch((error) => {
   logger.error('Restore drill failed', {
     event: 'restore_drill.failed',
-    error: error.message
+    error: redactDatabaseSecrets(error.message)
   });
   process.exit(1);
 });

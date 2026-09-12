@@ -1,11 +1,13 @@
 import { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } from 'discord.js';
-import { errorEmbed, successEmbed } from '../../utils/embeds.js';
+import { successEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
 import { TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
-import { getGuildGiveaways, deleteGiveaway } from '../../utils/giveaways.js';
+import { getGuildGiveaways, deleteGiveaway, isGiveawayEnded } from '../../utils/giveaways.js';
 import { logEvent, EVENT_TYPES } from '../../services/loggingService.js';
 
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+import { hasPermission } from '../../utils/permissionGuard.js';
+import { Mutex } from '../../utils/mutex.js';
 export default {
     data: new SlashCommandBuilder()
         .setName("gdelete")
@@ -30,7 +32,7 @@ export default {
             );
         }
 
-        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        if (!hasPermission(interaction.member, PermissionFlagsBits.ManageGuild)) {
             throw new TitanBotError(
                 'User lacks ManageGuild permission',
                 ErrorTypes.PERMISSION,
@@ -52,6 +54,7 @@ export default {
             );
         }
 
+        return Mutex.runExclusive(`giveaway:${messageId}`, async () => {
         const giveaways = await getGuildGiveaways(interaction.client, interaction.guildId);
         const giveaway = giveaways.find(g => g.messageId === messageId);
 
@@ -139,7 +142,7 @@ export default {
 
         const winnerIds = Array.isArray(giveaway.winnerIds) ? giveaway.winnerIds : [];
         const hasWinners = winnerIds.length > 0;
-        const wasEnded = giveaway.ended === true || giveaway.isEnded === true || hasWinners;
+        const wasEnded = giveaway.ended === true || giveaway.isEnded === true || hasWinners || isGiveawayEnded(giveaway);
 
         const winnerStatusMsg = hasWinners
             ? `This giveaway already had ${winnerIds.length} winner(s) selected.`
@@ -184,6 +187,7 @@ export default {
                 ),
             ],
             flags: MessageFlags.Ephemeral,
+        });
         });
     },
 };

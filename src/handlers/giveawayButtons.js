@@ -5,9 +5,11 @@ import { TitanBotError, ErrorTypes, handleInteractionError, replyUserError } fro
 import { 
     getGuildGiveaways, 
     saveGiveaway, 
-    isGiveawayEnded 
+    isGiveawayEnded,
+    getGiveawayParticipants,
 } from '../utils/giveaways.js';
 import { Mutex } from '../utils/mutex.js';
+import { hasPermission } from '../utils/permissionGuard.js';
 import { 
     selectWinners,
     isUserRateLimited,
@@ -49,7 +51,7 @@ export const giveawayJoinHandler = {
                     return replyUserError(interaction, { type: ErrorTypes.UNKNOWN, message: 'This giveaway has already ended.' });
                 }
 
-                const participants = giveaway.participants || [];
+                const participants = getGiveawayParticipants(giveaway);
                 const userId = interaction.user.id;
 
                 if (participants.includes(userId)) {
@@ -106,10 +108,12 @@ export const giveawayEndHandler = {
                 );
             }
 
-            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+            if (!hasPermission(interaction.member, PermissionFlagsBits.ManageGuild)) {
                 return replyUserError(interaction, { type: ErrorTypes.PERMISSION, message: 'You need the \'Manage Server\' permission to end a giveaway.' });
             }
 
+            const lockKey = `giveaway:${interaction.message.id}`;
+            await Mutex.runExclusive(lockKey, async () => {
             const guildGiveaways = await getGuildGiveaways(client, interaction.guildId);
             const giveaway = guildGiveaways.find(g => g.messageId === interaction.message.id);
 
@@ -131,7 +135,7 @@ export const giveawayEndHandler = {
                 );
             }
 
-            const participants = giveaway.participants || [];
+            const participants = getGiveawayParticipants(giveaway);
             const winners = selectWinners(participants, giveaway.winnerCount);
 
             giveaway.ended = true;
@@ -196,6 +200,7 @@ export const giveawayEndHandler = {
                 ],
                 flags: MessageFlags.Ephemeral
             });
+            });
 
         } catch (error) {
             logger.error('Error in giveaway end handler:', error);
@@ -222,10 +227,12 @@ export const giveawayRerollHandler = {
                 );
             }
 
-            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+            if (!hasPermission(interaction.member, PermissionFlagsBits.ManageGuild)) {
                 return replyUserError(interaction, { type: ErrorTypes.PERMISSION, message: 'You need the \'Manage Server\' permission to reroll a giveaway.' });
             }
 
+            const lockKey = `giveaway:${interaction.message.id}`;
+            await Mutex.runExclusive(lockKey, async () => {
             const guildGiveaways = await getGuildGiveaways(client, interaction.guildId);
             const giveaway = guildGiveaways.find(g => g.messageId === interaction.message.id);
 
@@ -247,7 +254,7 @@ export const giveawayRerollHandler = {
                 );
             }
 
-            const participants = giveaway.participants || [];
+            const participants = getGiveawayParticipants(giveaway);
             
             if (participants.length === 0) {
                 throw new TitanBotError(
@@ -317,6 +324,7 @@ export const giveawayRerollHandler = {
                     )
                 ],
                 flags: MessageFlags.Ephemeral
+            });
             });
 
         } catch (error) {

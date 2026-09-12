@@ -105,7 +105,12 @@ function normalizeCommandData(command) {
         return null;
     }
 
-    const jsonData = typeof rawData.toJSON === 'function' ? rawData.toJSON() : rawData;
+    let jsonData;
+    try {
+        jsonData = typeof rawData.toJSON === 'function' ? rawData.toJSON() : rawData;
+    } catch {
+        return null;
+    }
     if (!jsonData?.name) {
         return null;
     }
@@ -113,9 +118,13 @@ function normalizeCommandData(command) {
     return {
         ...jsonData,
         options: Array.isArray(jsonData.options)
-            ? jsonData.options.map((option) =>
-                  typeof option?.toJSON === 'function' ? option.toJSON() : option,
-              )
+            ? jsonData.options.map((option) => {
+                  try {
+                      return typeof option?.toJSON === 'function' ? option.toJSON() : option;
+                  } catch {
+                      return option;
+                  }
+              })
             : [],
     };
 }

@@ -200,6 +200,9 @@ function getStorageKey(guildId) {
 
 export async function getCountingGameConfig(client, guildId) {
   try {
+    if (!client?.db?.get) {
+      return normalizeCountingGame();
+    }
     const rawState = await client.db.get(getStorageKey(guildId));
     return normalizeCountingGame(rawState);
   } catch (error) {
@@ -210,6 +213,10 @@ export async function getCountingGameConfig(client, guildId) {
 
 export async function saveCountingGameConfig(client, guildId, state) {
   const normalized = normalizeCountingGame(state);
+  if (!client?.db?.set) {
+    logger.warn('Database not available for saveCountingGameConfig', { guildId });
+    return normalized;
+  }
   await client.db.set(getStorageKey(guildId), normalized);
   return normalized;
 }

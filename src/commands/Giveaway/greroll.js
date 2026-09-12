@@ -2,7 +2,7 @@ import { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } from 'discord.
 import { errorEmbed, successEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
 import { TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
-import { getGuildGiveaways, saveGiveaway } from '../../utils/giveaways.js';
+import { getGuildGiveaways, saveGiveaway, getGiveawayParticipants } from '../../utils/giveaways.js';
 import { 
     selectWinners,
     createGiveawayEmbed, 
@@ -10,6 +10,8 @@ import {
 } from '../../services/giveawayService.js';
 import { logEvent, EVENT_TYPES } from '../../services/loggingService.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+import { hasPermission } from '../../utils/permissionGuard.js';
+import { Mutex } from '../../utils/mutex.js';
 
 export default {
     data: new SlashCommandBuilder()
@@ -33,7 +35,7 @@ export default {
             );
         }
 
-        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        if (!hasPermission(interaction.member, PermissionFlagsBits.ManageGuild)) {
             throw new TitanBotError(
                 'User lacks ManageGuild permission',
                 ErrorTypes.PERMISSION,
@@ -55,6 +57,7 @@ export default {
             );
         }
 
+        return Mutex.runExclusive(`giveaway:${messageId}`, async () => {
         const giveaways = await getGuildGiveaways(
             interaction.client,
             interaction.guildId,
@@ -80,7 +83,7 @@ export default {
             );
         }
 
-        const participants = giveaway.participants || [];
+        const participants = getGiveawayParticipants(giveaway);
 
         if (participants.length < giveaway.winnerCount) {
             throw new TitanBotError(
@@ -284,6 +287,7 @@ export default {
                 ),
             ],
             flags: MessageFlags.Ephemeral,
+        });
         });
     },
 };

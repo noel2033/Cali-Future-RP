@@ -62,7 +62,6 @@ export {
 
 import { db, getFromDb, setInDb } from './database/wrapper.js';
 import {
-    getGuildConfigKey,
     getGuildBirthdaysKey,
     getLevelingKey,
     getUserLevelKey,
@@ -71,12 +70,10 @@ import {
     getUserApplicationsKey,
     getApplicationKey,
     getJoinToCreateConfigKey,
-    getJoinToCreateChannelsKey,
     getWelcomeConfigKey,
-    getEconomyKey,
-    getAFKKey,
     getUserLevelPrefix,
 } from './database/keys.js';
+import { toEpochMs, toNonNegativeInt } from './database/timestamps.js';
 
 export async function insertVerificationAudit(record) {
     try {
@@ -128,16 +125,24 @@ export function unwrapReplitData(data) {
 export { pgDb };
 
 export const getMessage = (key, replacements = {}) => {
-    let message = BotConfig.messages[key] || key;
-    for (const [k, v] of Object.entries(replacements)) {
+    let message = BotConfig.messages?.[key] || key;
+    const vars = replacements && typeof replacements === 'object' ? replacements : {};
+    for (const [k, v] of Object.entries(vars)) {
         message = message.replace(new RegExp(`\\{${k}\\}`, "g"), v);
     }
     return message;
 };
 
 export const getColor = (path, fallback = "#000000") => {
+    if (typeof path !== "string" || !path) {
+        return fallback;
+    }
+
     const parts = path.split(".");
-    let current = BotConfig.embeds.colors;
+    let current = BotConfig.embeds?.colors;
+    if (!current || typeof current !== "object") {
+        return fallback;
+    }
 
     for (const part of parts) {
         if (current[part] === undefined) {
@@ -150,16 +155,24 @@ export const getColor = (path, fallback = "#000000") => {
     return typeof current === "string" ? current : fallback;
 };
 
+function asPlainObject(value) {
+    const unwrapped = unwrapReplitData(value);
+    if (!unwrapped || typeof unwrapped !== 'object' || Array.isArray(unwrapped)) {
+        return {};
+    }
+    return unwrapped;
+}
+
 export async function getGuildBirthdays(client, guildId) {
     const key = getGuildBirthdaysKey(guildId);
     try {
-        if (!client.db || typeof client.db.get !== "function") {
+        if (!client?.db || typeof client.db.get !== "function") {
             logger.error("Database client is not available for getGuildBirthdays.");
             return {};
         }
 
         const rawData = await client.db.get(key, {});
-        return unwrapReplitData(rawData) || {};
+        return asPlainObject(rawData);
     } catch (error) {
         logger.error(`Error retrieving birthdays for guild ${guildId}:`, error);
         return {};
@@ -168,7 +181,7 @@ export async function getGuildBirthdays(client, guildId) {
 
 export async function setBirthday(client, guildId, userId, month, day) {
     try {
-        if (!client.db || typeof client.db.set !== "function") {
+        if (!client?.db || typeof client.db.set !== "function") {
             logger.error("Database client is not available for setBirthday.");
             return false;
         }
@@ -186,7 +199,7 @@ export async function setBirthday(client, guildId, userId, month, day) {
 
 export async function deleteBirthday(client, guildId, userId) {
     try {
-        if (!client.db || typeof client.db.set !== "function") {
+        if (!client?.db || typeof client.db.set !== "function") {
             logger.error("Database client is not available for deleteBirthday.");
             return false;
         }
@@ -227,12 +240,13 @@ async function getEndedGiveawaysFromKv(client) {
         return [];
     }
 
-    const keys = await wrapper.list('guild:');
+    const listed = await wrapper.list('guild:');
+    const keys = Array.isArray(listed) ? listed : [];
     const ended = [];
     const now = Date.now();
 
     for (const key of keys) {
-        if (!key.endsWith(':giveaways')) {
+        if (typeof key !== 'string' || !key.endsWith(':giveaways')) {
             continue;
         }
 
@@ -243,15 +257,15 @@ async function getEndedGiveawaysFromKv(client) {
 
         const rawGiveaways = await wrapper.get(key, {});
         const unwrapped = unwrapReplitData(rawGiveaways) || {};
-        const giveaways = Array.isArray(unwrapped) ? unwrapped : Object.values(unwrapped);
+        const giveaways = Array.isArray(unwrapped) ? unwrapped : Object.values(asPlainObject(unwrapped));
 
         for (const giveaway of giveaways) {
             if (!giveaway?.messageId || giveaway.ended || giveaway.isEnded) {
                 continue;
             }
 
-            const endTime = giveaway.endsAt || giveaway.endTime;
-            if (!endTime || now < Number(endTime)) {
+            const endMs = toEpochMs(giveaway.endsAt || giveaway.endTime, Number.NaN);
+            if (!Number.isFinite(endMs) || now < endMs) {
                 continue;
             }
 
@@ -260,7 +274,7 @@ async function getEndedGiveawaysFromKv(client) {
                 guild_id: guildId,
                 message_id: giveaway.messageId,
                 data: giveaway,
-                ends_at: new Date(Number(endTime)),
+                ends_at: new Date(endMs),
             });
         }
     }
@@ -386,7 +400,7 @@ function normalizeWelcomeConfig(raw = {}) {
 }
 
 export async function getWelcomeConfig(client, guildId) {
-    if (!client.db) {
+    if (!client?.db) {
         logger.warn('Database not available for getWelcomeConfig');
         return normalizeWelcomeConfig();
     }
@@ -405,7 +419,7 @@ export async function getWelcomeConfig(client, guildId) {
 export async function saveWelcomeConfig(client, guildId, config) {
     const key = getWelcomeConfigKey(guildId);
     try {
-        if (!client.db || typeof client.db.set !== 'function') {
+        if (!client?.db || typeof client.db.set !== 'function') {
             logger.error('Database client is not available for saveWelcomeConfig.');
             return false;
         }
@@ -481,7 +495,7 @@ export async function getUserLevelData(client, guildId, userId) {
     const key = getUserLevelKey(guildId, userId);
     try {
         const data = await getFromDb(key, null);
-        if (!data) {
+        if (!data || typeof data !== 'object' || Array.isArray(data)) {
             return {
                 xp: 0,
                 level: 0,
@@ -492,13 +506,14 @@ export async function getUserLevelData(client, guildId, userId) {
             };
         }
         
+        const level = Math.min(toNonNegativeInt(data.level), 1000);
         const levelData = {
-            xp: data.xp || 0,
-            level: data.level || 0,
-            totalXp: data.totalXp || 0,
-            lastMessage: data.lastMessage || 0,
-            rank: data.rank || 0,
-            xpToNextLevel: getXpForLevel((data.level || 0) + 1)
+            xp: toNonNegativeInt(data.xp),
+            level,
+            totalXp: toNonNegativeInt(data.totalXp ?? data.total_xp),
+            lastMessage: toEpochMs(data.lastMessage ?? data.last_message, 0),
+            rank: toNonNegativeInt(data.rank),
+            xpToNextLevel: getXpForLevel(level + 1)
         };
         
         return levelData;
@@ -518,13 +533,18 @@ export async function getUserLevelData(client, guildId, userId) {
 export async function saveUserLevelData(client, guildId, userId, data) {
     const key = getUserLevelKey(guildId, userId);
     try {
+        if (!data || typeof data !== 'object') {
+            logger.error(`Invalid level data for user ${userId} in guild ${guildId}`);
+            return false;
+        }
+
         const levelData = {
             ...data,
-            xp: data.xp || 0,
-            level: data.level || 0,
-            totalXp: data.totalXp || 0,
-            lastMessage: data.lastMessage || 0,
-            rank: data.rank || 0,
+            xp: toNonNegativeInt(data.xp),
+            level: Math.min(toNonNegativeInt(data.level), 1000),
+            totalXp: toNonNegativeInt(data.totalXp ?? data.total_xp),
+            lastMessage: toEpochMs(data.lastMessage ?? data.last_message, 0),
+            rank: toNonNegativeInt(data.rank),
             updatedAt: Date.now()
         };
         
@@ -537,12 +557,13 @@ export async function saveUserLevelData(client, guildId, userId, data) {
 }
 
 export function getXpForLevel(level) {
-    return 5 * Math.pow(level, 2) + 50 * level + 50;
+    const n = Math.min(toNonNegativeInt(level), 1000);
+    return 5 * Math.pow(n, 2) + 50 * n + 50;
 }
 
 export async function getLeaderboard(client, guildId, limit = 10) {
     try {
-        if (!client.db || typeof client.db.list !== "function") {
+        if (!client?.db || typeof client.db.list !== "function") {
             logger.error("Database client is not available for getLeaderboard.");
             return [];
         }
@@ -569,12 +590,15 @@ export async function getLeaderboard(client, guildId, limit = 10) {
                 if (!data) return null;
                 
                 const unwrapped = unwrapReplitData(data);
+                if (!unwrapped || typeof unwrapped !== 'object') return null;
+
+                const level = Math.min(toNonNegativeInt(unwrapped.level), 1000);
                 return {
                     userId,
-                    xp: unwrapped.xp || 0,
-                    level: unwrapped.level || 0,
-                    totalXp: unwrapped.totalXp || 0,
-rank: 0
+                    xp: toNonNegativeInt(unwrapped.xp),
+                    level,
+                    totalXp: toNonNegativeInt(unwrapped.totalXp ?? unwrapped.total_xp),
+                    rank: 0
                 };
             } catch (error) {
                 logger.error(`Error processing leaderboard key ${key}:`, error);
@@ -591,7 +615,11 @@ rank: 0
             rank: index + 1
         }));
         
-        return userData.slice(0, limit);
+        let safeLimit = toNonNegativeInt(limit, 10);
+        if (safeLimit < 1) safeLimit = 10;
+        if (safeLimit > 100) safeLimit = 100;
+
+        return userData.slice(0, safeLimit);
     } catch (error) {
         logger.error(`Error getting leaderboard for guild ${guildId}:`, error);
         return [];
@@ -600,7 +628,7 @@ rank: 0
 
 export async function getApplicationRoles(client, guildId) {
     try {
-        if (!client.db || typeof client.db.get !== "function") {
+        if (!client?.db || typeof client.db.get !== "function") {
             logger.error("Database client is not available for getApplicationRoles.");
             return [];
         }
@@ -617,7 +645,7 @@ export async function getApplicationRoles(client, guildId) {
 
 export async function saveApplicationRoles(client, guildId, roles) {
     try {
-        if (!client.db || typeof client.db.set !== "function") {
+        if (!client?.db || typeof client.db.set !== "function") {
             logger.error("Database client is not available for saveApplicationRoles.");
             return false;
         }
@@ -657,7 +685,7 @@ function buildApplicationSettingsDefaults() {
 }
 
 export async function getApplicationSettings(client, guildId) {
-    if (!client.db) {
+    if (!client?.db) {
         logger.warn('Database not available for getApplicationSettings');
         return buildApplicationSettingsDefaults();
     }
@@ -691,9 +719,10 @@ function isApplicationExpired(application, retentionDays, now = Date.now()) {
         return false;
     }
 
-    const createdAt = Number(application.createdAt) || now;
-    const updatedAt = Number(application.updatedAt) || createdAt;
-    const reviewedAt = application.reviewedAt ? Number(new Date(application.reviewedAt)) : null;
+    const createdAt = toEpochMs(application.createdAt, now);
+    const updatedAt = toEpochMs(application.updatedAt, createdAt);
+    const reviewedAtRaw = application.reviewedAt != null ? toEpochMs(application.reviewedAt, Number.NaN) : Number.NaN;
+    const reviewedAt = Number.isFinite(reviewedAtRaw) ? reviewedAtRaw : null;
     const status = typeof application.status === 'string' ? application.status.toLowerCase() : 'pending';
 
     const ageMsFromCreated = now - createdAt;
@@ -713,6 +742,11 @@ function isApplicationExpired(application, retentionDays, now = Date.now()) {
 }
 
 export async function deleteApplication(client, guildId, applicationId, userIdHint = null) {
+    if (!client?.db || typeof client.db.get !== 'function' || typeof client.db.delete !== 'function') {
+        logger.error('Database client is not available for deleteApplication.');
+        return false;
+    }
+
     const key = getApplicationKey(guildId, applicationId);
 
     try {
@@ -739,7 +773,7 @@ export async function deleteApplication(client, guildId, applicationId, userIdHi
 
 export async function cleanupExpiredApplications(client, guildId) {
     try {
-        if (!client.db || typeof client.db.list !== 'function') {
+        if (!client?.db || typeof client.db.list !== 'function') {
             return { removed: 0, scanned: 0 };
         }
 
@@ -786,6 +820,11 @@ export async function cleanupExpiredApplications(client, guildId) {
 export async function saveApplicationSettings(client, guildId, settings) {
     const key = getApplicationSettingsKey(guildId);
     try {
+        if (!client?.db || typeof client.db.set !== 'function') {
+            logger.error('Database client is not available for saveApplicationSettings.');
+            return false;
+        }
+
         const existingSettings = await getApplicationSettings(client, guildId);
         const mergedSettings = { ...existingSettings, ...settings };
         
@@ -803,7 +842,7 @@ function getApplicationRoleSettingsKey(guildId, roleId) {
 
 export async function getApplicationRoleSettings(client, guildId, roleId) {
     try {
-        if (!client.db || typeof client.db.get !== "function") {
+        if (!client?.db || typeof client.db.get !== "function") {
             return { questions: null, logChannelId: null };
         }
 
@@ -818,7 +857,7 @@ export async function getApplicationRoleSettings(client, guildId, roleId) {
 
 export async function saveApplicationRoleSettings(client, guildId, roleId, settings) {
     try {
-        if (!client.db || typeof client.db.set !== "function") {
+        if (!client?.db || typeof client.db.set !== "function") {
             logger.error("Database client is not available for saveApplicationRoleSettings.");
             return false;
         }
@@ -834,7 +873,7 @@ export async function saveApplicationRoleSettings(client, guildId, roleId, setti
 
 export async function deleteApplicationRoleSettings(client, guildId, roleId) {
     try {
-        if (!client.db || typeof client.db.delete !== "function") {
+        if (!client?.db || typeof client.db.delete !== "function") {
             logger.error("Database client is not available for deleteApplicationRoleSettings.");
             return false;
         }
@@ -849,6 +888,10 @@ export async function deleteApplicationRoleSettings(client, guildId, roleId) {
 }
 
 export async function createApplication(client, application) {
+    if (!application || typeof application !== 'object') {
+        throw new Error('Invalid application payload');
+    }
+
     const { guildId, userId } = application;
     const applicationId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const key = getApplicationKey(guildId, applicationId);
@@ -865,7 +908,7 @@ status: 'pending',
     };
     
     try {
-        if (!client.db || typeof client.db.set !== "function") {
+        if (!client?.db || typeof client.db.set !== "function") {
             logger.error("Database client is not available for createApplication.");
             throw new Error("Database not available");
         }
@@ -892,6 +935,11 @@ status: 'pending',
 }
 
 export async function getApplication(client, guildId, applicationId) {
+    if (!client?.db || typeof client.db.get !== 'function') {
+        logger.error('Database client is not available for getApplication.');
+        return null;
+    }
+
     const key = getApplicationKey(guildId, applicationId);
     try {
         await cleanupExpiredApplications(client, guildId);
@@ -904,6 +952,11 @@ export async function getApplication(client, guildId, applicationId) {
 }
 
 export async function updateApplication(client, guildId, applicationId, updates) {
+    if (!client?.db || typeof client.db.set !== 'function') {
+        logger.error('Database client is not available for updateApplication.');
+        throw new Error('Database not available');
+    }
+
     const key = getApplicationKey(guildId, applicationId);
     try {
         const existingApplication = await getApplication(client, guildId, applicationId);
@@ -928,7 +981,7 @@ export async function updateApplication(client, guildId, applicationId, updates)
 export async function getUserApplications(client, guildId, userId) {
     const userKey = getUserApplicationsKey(guildId, userId);
     try {
-        if (!client.db || typeof client.db.get !== "function") {
+        if (!client?.db || typeof client.db.get !== "function") {
             logger.error("Database client is not available for getUserApplications.");
             return [];
         }
@@ -961,7 +1014,7 @@ export async function getApplications(client, guildId, filters = {}) {
     } = filters;
     
     try {
-        if (!client.db || typeof client.db.list !== "function") {
+        if (!client?.db || typeof client.db.list !== "function") {
             logger.error("Database client is not available for getApplications.");
             return [];
         }
@@ -996,7 +1049,7 @@ export async function getApplications(client, guildId, filters = {}) {
             applications = applications.filter(app => app.userId === userId);
         }
         
-        applications.sort((a, b) => b.createdAt - a.createdAt);
+        applications.sort((a, b) => toEpochMs(b.createdAt, 0) - toEpochMs(a.createdAt, 0));
         
         return applications.slice(offset, offset + limit);
     } catch (error) {
@@ -1005,54 +1058,67 @@ export async function getApplications(client, guildId, filters = {}) {
     }
 }
 
+function defaultJoinToCreateConfig() {
+    return {
+        enabled: false,
+        triggerChannels: [],
+        categoryId: null,
+        channelNameTemplate: "{username}'s Room",
+        userLimit: 0,
+        bitrate: 64000,
+        temporaryChannels: {},
+    };
+}
+
+function normalizeJoinToCreateConfig(raw) {
+    const defaults = defaultJoinToCreateConfig();
+    const base = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const userLimit = Number(base.userLimit);
+    const bitrate = Number(base.bitrate);
+
+    return {
+        ...base,
+        enabled: Boolean(base.enabled),
+        triggerChannels: Array.isArray(base.triggerChannels) ? base.triggerChannels : defaults.triggerChannels,
+        categoryId: base.categoryId ?? defaults.categoryId,
+        channelNameTemplate: typeof base.channelNameTemplate === 'string' && base.channelNameTemplate
+            ? base.channelNameTemplate
+            : defaults.channelNameTemplate,
+        userLimit: Number.isFinite(userLimit) ? userLimit : defaults.userLimit,
+        bitrate: Number.isFinite(bitrate) ? bitrate : defaults.bitrate,
+        temporaryChannels:
+            base.temporaryChannels && typeof base.temporaryChannels === 'object' && !Array.isArray(base.temporaryChannels)
+                ? base.temporaryChannels
+                : defaults.temporaryChannels,
+    };
+}
+
 export async function getJoinToCreateConfig(client, guildId) {
-    if (!client.db) {
+    if (!client?.db) {
         logger.warn('Database not available for getJoinToCreateConfig');
-        return {
-            enabled: false,
-            triggerChannels: [],
-            categoryId: null,
-            channelNameTemplate: "{username}'s Room",
-            userLimit: 0,
-            bitrate: 64000,
-            temporaryChannels: {}
-        };
+        return defaultJoinToCreateConfig();
     }
     
     const key = getJoinToCreateConfigKey(guildId);
     try {
         const config = await client.db.get(key, {});
-        const unwrapped = unwrapReplitData(config);
-        
-        return {
-            enabled: unwrapped.enabled || false,
-            triggerChannels: unwrapped.triggerChannels || [],
-            categoryId: unwrapped.categoryId || null,
-            channelNameTemplate: unwrapped.channelNameTemplate || "{username}'s Room",
-            userLimit: unwrapped.userLimit || 0,
-            bitrate: unwrapped.bitrate || 64000,
-            temporaryChannels: unwrapped.temporaryChannels || {},
-            ...unwrapped
-        };
+        return normalizeJoinToCreateConfig(unwrapReplitData(config));
     } catch (error) {
         logger.error(`Error getting Join to Create config for guild ${guildId}:`, error);
-        return {
-            enabled: false,
-            triggerChannels: [],
-            categoryId: null,
-            channelNameTemplate: "{username}'s Room",
-            userLimit: 0,
-            bitrate: 64000,
-            temporaryChannels: {}
-        };
+        return defaultJoinToCreateConfig();
     }
 }
 
 export async function saveJoinToCreateConfig(client, guildId, config) {
     const key = getJoinToCreateConfigKey(guildId);
     try {
+        if (!client?.db || typeof client.db.set !== 'function') {
+            logger.error('Database client is not available for saveJoinToCreateConfig.');
+            return false;
+        }
+
         const existingConfig = await getJoinToCreateConfig(client, guildId);
-        const mergedConfig = { ...existingConfig, ...config };
+        const mergedConfig = normalizeJoinToCreateConfig({ ...existingConfig, ...config });
         
         await client.db.set(key, mergedConfig);
         return true;
@@ -1170,15 +1236,16 @@ export async function getTemporaryChannelInfo(client, guildId, channelId) {
     }
 }
 
-export function formatChannelName(template, variables) {
-    let formatted = template;
+export function formatChannelName(template, variables = {}) {
+    let formatted = typeof template === 'string' ? template : "{username}'s Room";
+    const vars = variables && typeof variables === 'object' ? variables : {};
     
     const replacements = {
-        '{username}': variables.username || 'User',
-        '{user_tag}': variables.userTag || 'User#0000',
-        '{display_name}': variables.displayName || 'User',
-        '{guild_name}': variables.guildName || 'Server',
-        '{channel_name}': variables.channelName || 'Voice Channel'
+        '{username}': vars.username || 'User',
+        '{user_tag}': vars.userTag || 'User#0000',
+        '{display_name}': vars.displayName || 'User',
+        '{guild_name}': vars.guildName || 'Server',
+        '{channel_name}': vars.channelName || 'Voice Channel'
     };
     
     for (const [placeholder, value] of Object.entries(replacements)) {
@@ -1186,11 +1253,7 @@ export function formatChannelName(template, variables) {
     }
     
     formatted = formatted.replace(/[^\w\s-]/g, '').trim();
-formatted = formatted.substring(0, 100);
+    formatted = formatted.substring(0, 100);
     
     return formatted || 'Voice Channel';
-}
-
-function generateCaseId() {
-    return `${Date.now().toString(36)}-${Math.random().toString(36).substr(2, 4)}`;
 }

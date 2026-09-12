@@ -4,27 +4,52 @@ import { EmbedBuilder } from 'discord.js';
 import { logger } from '../../utils/logger.js';
 import { getGuildConfig, setGuildConfig } from '../config/guildConfig.js';
 import { TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
-import { addXp } from './xpSystem.js';
 import { getUserLevelKey } from '../../utils/database/keys.js';
+import { toEpochMs, toNonNegativeInt } from '../../utils/database/timestamps.js';
 
-const BASE_XP = 100;
-const XP_MULTIPLIER = 1.5;
-const MAX_LEVEL = 1000;
-const MIN_LEVEL = 0;
+export const MAX_LEVEL = 1000;
+export const MIN_LEVEL = 0;
+
+const DEFAULT_LEVELING_CONFIG = {
+  enabled: true,
+  xpPerMessage: { min: 15, max: 25 },
+  xpCooldown: 20,
+  levelUpMessage: '{user} has leveled up to level {level}!',
+  levelUpChannel: null,
+  ignoredChannels: [],
+  ignoredRoles: [],
+  blacklistedUsers: [],
+  roleRewards: {},
+  announceLevelUp: true,
+  xpMultiplier: 1
+};
+
+function mergeLevelingConfig(config) {
+  if (!config || typeof config !== 'object') {
+    return { ...DEFAULT_LEVELING_CONFIG };
+  }
+  return { ...DEFAULT_LEVELING_CONFIG, ...config };
+}
+
+function xpCurve(level) {
+  return 5 * Math.pow(level, 2) + 50 * level + 50;
+}
 
 export function getXpForLevel(level) {
-  if (!Number.isInteger(level) || level < 0 || level > MAX_LEVEL) {
+  if (!Number.isInteger(level) || level < MIN_LEVEL) {
     throw new TitanBotError(
-      `Invalid level: ${level}. Must be between ${MIN_LEVEL} and ${MAX_LEVEL}`,
+      `Invalid level: ${level}. Must be an integer >= ${MIN_LEVEL}`,
       ErrorTypes.VALIDATION,
       'The level must be a valid number.'
     );
   }
-  return 5 * Math.pow(level, 2) + 50 * level + 50;
+  // Rank/leaderboard/xpSystem pass level+1; do not throw at the cap.
+  return xpCurve(Math.min(level, MAX_LEVEL));
 }
 
 export function getLevelFromXp(xp) {
-  if (!Number.isInteger(xp) || xp < 0) {
+  const amount = toNonNegativeInt(xp, Number.NaN);
+  if (!Number.isFinite(amount)) {
     throw new TitanBotError(
       `Invalid XP: ${xp}`,
       ErrorTypes.VALIDATION,
@@ -32,25 +57,27 @@ export function getLevelFromXp(xp) {
     );
   }
 
+  let remaining = amount;
   let level = 0;
   let xpNeeded = 0;
-  
-  while (xp >= getXpForLevel(level) && level < MAX_LEVEL) {
+
+  while (remaining >= getXpForLevel(level) && level < MAX_LEVEL) {
     xpNeeded = getXpForLevel(level);
-    xp -= xpNeeded;
+    remaining -= xpNeeded;
     level++;
   }
-  
+
   return {
     level: Math.min(level, MAX_LEVEL),
-    currentXp: xp,
+    currentXp: remaining,
     xpNeeded: getXpForLevel(Math.min(level, MAX_LEVEL))
   };
 }
 
 export function calculateTotalXp(level, currentXp = 0) {
-  let total = currentXp;
-  for (let i = 0; i < level; i++) {
+  const safeLevel = Math.min(toNonNegativeInt(level), MAX_LEVEL);
+  let total = toNonNegativeInt(currentXp);
+  for (let i = 0; i < safeLevel; i++) {
     total += getXpForLevel(i);
   }
   return total;
@@ -67,34 +94,49 @@ export async function getLeaderboard(client, guildId, limit = 10) {
       );
     }
 
-    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
-      limit = Math.min(Math.max(limit, 1), 100);
-    }
+    let safeLimit = toNonNegativeInt(limit, 10);
+    if (safeLimit < 1) safeLimit = 10;
+    if (safeLimit > 100) safeLimit = 100;
 
-    const guild = client.guilds.cache.get(guildId);
+    const guild = client?.guilds?.cache?.get(guildId);
     if (!guild) {
       logger.warn(`Guild ${guildId} not found in cache`);
       return [];
     }
     
-    const members = await guild.members.fetch().catch(error => {
+    let members = new Map();
+    try {
+      if (typeof guild.members?.fetch === 'function') {
+        members = await guild.members.fetch();
+      } else if (guild.members?.cache && typeof guild.members.cache[Symbol.iterator] === 'function') {
+        members = guild.members.cache;
+      }
+    } catch (error) {
       logger.error(`Failed to fetch members for guild ${guildId}:`, error);
-      return new Map();
-    });
+      members = new Map();
+    }
+
+    if (!members || typeof members[Symbol.iterator] !== 'function') {
+      return [];
+    }
 
     const leaderboard = [];
     
     for (const [userId, member] of members) {
-      if (member.user.bot) continue;
-      
-      const data = await getUserLevelData(client, guildId, userId);
-      if (data && (data.totalXp > 0 || data.level > 0)) {
-        leaderboard.push({
-          userId,
-          username: member.user.username,
-          discriminator: member.user.discriminator,
-          ...data
-        });
+      if (member?.user?.bot) continue;
+
+      try {
+        const data = await getUserLevelData(client, guildId, userId);
+        if (data && (data.totalXp > 0 || data.level > 0)) {
+          leaderboard.push({
+            userId,
+            username: member.user?.username,
+            discriminator: member.user?.discriminator,
+            ...data
+          });
+        }
+      } catch (error) {
+        logger.error(`Error getting leaderboard data for user ${userId} in guild ${guildId}:`, error);
       }
     }
     
@@ -104,7 +146,7 @@ export async function getLeaderboard(client, guildId, limit = 10) {
       entry.rank = index + 1;
     });
     
-    return leaderboard.slice(0, limit);
+    return leaderboard.slice(0, safeLimit);
     
   } catch (error) {
     logger.error('Error getting leaderboard:', error);
@@ -118,8 +160,9 @@ export async function getLeaderboard(client, guildId, limit = 10) {
 }
 
 export function createLeaderboardEmbed(leaderboard, guild) {
+  const guildName = guild?.name || 'Server';
   const embed = new EmbedBuilder()
-    .setTitle(`🏆 ${guild.name} Leaderboard`)
+    .setTitle(`${guildName} Leaderboard`)
     .setColor('#2ecc71')
     .setTimestamp();
     
@@ -150,34 +193,10 @@ export function createLeaderboardEmbed(leaderboard, guild) {
 export async function getLevelingConfig(client, guildId) {
   try {
     const guildConfig = await getGuildConfig(client, guildId);
-    return guildConfig.leveling || {
-      enabled: true,
-      xpPerMessage: { min: 15, max: 25 },
-      xpCooldown: 20,
-      levelUpMessage: '{user} has leveled up to level {level}!',
-      levelUpChannel: null,
-      ignoredChannels: [],
-      ignoredRoles: [],
-      blacklistedUsers: [],
-      roleRewards: {},
-      announceLevelUp: true,
-      xpMultiplier: 1
-    };
+    return mergeLevelingConfig(guildConfig?.leveling);
   } catch (error) {
     logger.error(`Error getting leveling config for guild ${guildId}:`, error);
-    return {
-      enabled: true,
-      xpPerMessage: { min: 15, max: 25 },
-      xpCooldown: 20,
-      levelUpMessage: '{user} has leveled up to level {level}!',
-      levelUpChannel: null,
-      ignoredChannels: [],
-      ignoredRoles: [],
-      blacklistedUsers: [],
-      roleRewards: {},
-      announceLevelUp: true,
-      xpMultiplier: 1
-    };
+    return mergeLevelingConfig();
   }
 }
 
@@ -190,10 +209,18 @@ export async function getUserLevelData(client, guildId, userId) {
       );
     }
 
+    if (!client?.db || typeof client.db.get !== 'function') {
+      throw new TitanBotError(
+        'Database client is not available',
+        ErrorTypes.DATABASE,
+        'Could not fetch level data at this time.'
+      );
+    }
+
     const key = getUserLevelKey(guildId, userId);
     const data = await client.db.get(key);
     
-    if (!data) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
       return {
         xp: 0,
         level: 0,
@@ -204,11 +231,11 @@ export async function getUserLevelData(client, guildId, userId) {
     }
     
     return {
-      xp: Math.max(0, data.xp || 0),
-      level: Math.max(0, Math.min(data.level || 0, MAX_LEVEL)),
-      totalXp: Math.max(0, data.totalXp || 0),
-      lastMessage: data.lastMessage || 0,
-      rank: data.rank || 0
+      xp: toNonNegativeInt(data.xp),
+      level: Math.min(toNonNegativeInt(data.level), MAX_LEVEL),
+      totalXp: toNonNegativeInt(data.totalXp ?? data.total_xp),
+      lastMessage: toEpochMs(data.lastMessage ?? data.last_message, 0),
+      rank: toNonNegativeInt(data.rank)
     };
   } catch (error) {
     logger.error(`Error getting user level data for ${userId}:`, error);
@@ -237,12 +264,20 @@ export async function saveUserLevelData(client, guildId, userId, data) {
       );
     }
 
+    if (!client?.db || typeof client.db.set !== 'function') {
+      throw new TitanBotError(
+        'Database client is not available',
+        ErrorTypes.DATABASE,
+        'Could not save level data at this time.'
+      );
+    }
+
     const sanitizedData = {
-      xp: Math.max(0, Number(data.xp) || 0),
-      level: Math.max(0, Math.min(Number(data.level) || 0, MAX_LEVEL)),
-      totalXp: Math.max(0, Number(data.totalXp) || 0),
-      lastMessage: Number(data.lastMessage) || 0,
-      rank: Number(data.rank) || 0
+      xp: toNonNegativeInt(data.xp),
+      level: Math.min(toNonNegativeInt(data.level), MAX_LEVEL),
+      totalXp: toNonNegativeInt(data.totalXp ?? data.total_xp),
+      lastMessage: toEpochMs(data.lastMessage ?? data.last_message, 0),
+      rank: toNonNegativeInt(data.rank)
     };
 
     const key = getUserLevelKey(guildId, userId);
@@ -268,24 +303,41 @@ export async function saveLevelingConfig(client, guildId, config) {
     }
 
     const guildConfig = await getGuildConfig(client, guildId);
-
-    if (config.xpCooldown && (config.xpCooldown < 0 || config.xpCooldown > 3600)) {
+    if (!guildConfig || typeof guildConfig !== 'object') {
       throw new TitanBotError(
-        'XP cooldown must be between 0 and 3600 seconds',
-        ErrorTypes.VALIDATION,
-        'Cooldown must be between 0 and 3600 seconds.'
+        'Guild configuration is not available',
+        ErrorTypes.DATABASE,
+        'Could not save configuration at this time.'
       );
     }
 
-    if (config.xpRange && (config.xpRange.min < 1 || config.xpRange.max < 1 || config.xpRange.min > config.xpRange.max)) {
-      throw new TitanBotError(
-        'Invalid XP range configuration',
-        ErrorTypes.VALIDATION,
-        'Minimum XP must be less than maximum XP, and both must be positive.'
-      );
+    if (config.xpCooldown != null) {
+      const cooldown = Number(config.xpCooldown);
+      if (!Number.isFinite(cooldown) || cooldown < 0 || cooldown > 3600) {
+        throw new TitanBotError(
+          'XP cooldown must be between 0 and 3600 seconds',
+          ErrorTypes.VALIDATION,
+          'Cooldown must be between 0 and 3600 seconds.'
+        );
+      }
     }
 
-    guildConfig.leveling = config;
+    if (config.xpRange) {
+      const min = Number(config.xpRange.min);
+      const max = Number(config.xpRange.max);
+      if (!Number.isFinite(min) || !Number.isFinite(max) || min < 1 || max < 1 || min > max) {
+        throw new TitanBotError(
+          'Invalid XP range configuration',
+          ErrorTypes.VALIDATION,
+          'Minimum XP must be less than maximum XP, and both must be positive.'
+        );
+      }
+    }
+
+    guildConfig.leveling = mergeLevelingConfig({
+      ...(guildConfig.leveling && typeof guildConfig.leveling === 'object' ? guildConfig.leveling : {}),
+      ...config,
+    });
     await setGuildConfig(client, guildId, guildConfig);
     
     logger.info(`Leveling config updated for guild ${guildId}`);
@@ -446,6 +498,11 @@ export async function deleteUserLevelData(client, guildId, userId) {
         'Guild ID and User ID are required',
         ErrorTypes.VALIDATION
       );
+    }
+
+    if (!client?.db || typeof client.db.delete !== 'function') {
+      logger.warn(`Database client is not available; skipped delete of level data for user ${userId}`);
+      return;
     }
 
     const key = getUserLevelKey(guildId, userId);

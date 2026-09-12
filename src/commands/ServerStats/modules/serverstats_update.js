@@ -5,6 +5,7 @@ import { logger } from '../../../utils/logger.js';
 
 import { InteractionHelper } from '../../../utils/interactionHelper.js';
 import { replyUserError, ErrorTypes } from '../../../utils/errorHandler.js';
+import { hasPermission } from '../../../utils/permissionGuard.js';
 export async function handleUpdate(interaction, client) {
     const guild = interaction.guild;
     const counterId = interaction.options.getString("counter-id");
@@ -17,7 +18,7 @@ export async function handleUpdate(interaction, client) {
         return;
     }
 
-    if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
+    if (!hasPermission(interaction.member, PermissionFlagsBits.ManageChannels)) {
         await replyUserError(interaction, { type: ErrorTypes.PERMISSION, message: 'You need **Manage Channels** permission to update counters.' }).catch(logger.error);
         return;
     }

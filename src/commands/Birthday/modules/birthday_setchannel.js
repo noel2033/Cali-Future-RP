@@ -1,11 +1,12 @@
 import { PermissionsBitField, EmbedBuilder, MessageFlags } from 'discord.js';
 import { getGuildConfig, setGuildConfig } from '../../../services/config/guildConfig.js';
 import { InteractionHelper } from '../../../utils/interactionHelper.js';
+import { hasPermission } from '../../../utils/permissionGuard.js';
 import { logger } from '../../../utils/logger.js';
 
 export default {
     async execute(interaction, config, client) {
-        if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+        if (!hasPermission(interaction.member, PermissionsBitField.Flags.ManageGuild)) {
             const embed = new EmbedBuilder()
                 .setColor(0xFF0000)
                 .setTitle('Permission Denied')

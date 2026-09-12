@@ -21,6 +21,7 @@ import {
 import { getGuildConfig } from '../services/config/guildConfig.js';
 import { successEmbed } from '../utils/embeds.js';
 import { replyUserError, ErrorTypes, handleInteractionError } from '../utils/errorHandler.js';
+import { hasPermission, botHasPermission } from '../utils/permissionGuard.js';
 import { logger } from '../utils/logger.js';
 import {
   buildLoggingDashboardView,
@@ -50,7 +51,7 @@ export default {
 
   async execute(interaction) {
     try {
-      if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+      if (!hasPermission(interaction.member, PermissionFlagsBits.ManageGuild)) {
         return interaction.reply({
           content: '❌ You need **Manage Server** permissions to use this.',
           ephemeral: true,
@@ -334,7 +335,13 @@ async function showChannelModal(interaction, destination) {
       filter: (i) => i.user.id === interaction.user.id && i.customId === modalCustomId,
     });
 
-    const channelId = modalSubmission.fields.getField('log_channel').values[0];
+    const channelId = modalSubmission.fields.getField('log_channel')?.values?.[0];
+    if (!channelId) {
+      return modalSubmission.reply({
+        content: '❌ Please select a channel.',
+        flags: MessageFlags.Ephemeral,
+      });
+    }
     const channel = interaction.guild.channels.cache.get(channelId)
       ?? await interaction.guild.channels.fetch(channelId).catch(() => null);
 
@@ -345,8 +352,7 @@ async function showChannelModal(interaction, destination) {
       });
     }
 
-    const botPerms = channel.permissionsFor(interaction.guild.members.me);
-    if (!botPerms?.has(['ViewChannel', 'SendMessages', 'EmbedLinks'])) {
+    if (!botHasPermission(channel, ['ViewChannel', 'SendMessages', 'EmbedLinks'])) {
       return modalSubmission.reply({
         content: '❌ I need View Channel, Send Messages, and Embed Links in that channel.',
         flags: MessageFlags.Ephemeral,
@@ -374,14 +380,17 @@ async function showChannelModal(interaction, destination) {
 }
 
 export async function handleLoggingMenuSelect(interaction) {
-  if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+  if (!hasPermission(interaction.member, PermissionFlagsBits.ManageGuild)) {
     return interaction.reply({
       content: '❌ You need **Manage Server** permissions to use this.',
       ephemeral: true,
     });
   }
 
-  const value = interaction.values[0];
+  const value = interaction.values?.[0];
+  if (!value) {
+    return;
+  }
 
   if (value.startsWith('set:')) {
     const destination = value.replace('set:', '');

@@ -14,6 +14,7 @@ import {
     getStructuredListPlan,
 } from './database/keyParser.js';
 import { runKeyMigration } from './database/keyMigration.js';
+import { toDate, toEpochMs, toPgInt } from './database/timestamps.js';
 import {
     tableStatements,
     indexStatements,
@@ -21,24 +22,51 @@ import {
     triggerDefinitions,
 } from './database/schema.js';
 
-function normalizeTimestampInput(value, fallback = new Date()) {
-    if (value instanceof Date && !Number.isNaN(value.getTime())) {
-        return value;
+function toSqlDateOrNull(value) {
+    if (value == null || value === '') {
+        return null;
     }
 
-    const numericValue = typeof value === 'string' && /^[0-9]+$/.test(value)
-        ? Number(value)
-        : Number(value);
+    const ms = toEpochMs(value, Number.NaN);
+    return Number.isFinite(ms) ? new Date(ms) : null;
+}
 
-    if (Number.isFinite(numericValue) && numericValue >= 0) {
-        const date = new Date(numericValue);
-        if (!Number.isNaN(date.getTime())) {
-            return date;
+function normalizeBirthdayEntries(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null;
+    }
+
+    const entries = [];
+    for (const [userId, birthday] of Object.entries(value)) {
+        if (!userId || !birthday || typeof birthday !== 'object' || Array.isArray(birthday)) {
+            continue;
         }
+
+        const month = Number(birthday.month);
+        const day = Number(birthday.day);
+        if (!Number.isInteger(month) || !Number.isInteger(day) || month < 1 || month > 12 || day < 1 || day > 31) {
+            continue;
+        }
+
+        entries.push({ userId, month, day });
     }
 
-    const parsedDate = new Date(value);
-    return !Number.isNaN(parsedDate.getTime()) ? parsedDate : fallback;
+    return entries;
+}
+
+function normalizeGiveawayEntries(value) {
+    if (value == null) {
+        return null;
+    }
+
+    const list = Array.isArray(value)
+        ? value
+        : (typeof value === 'object' ? Object.values(value) : null);
+    if (!list) {
+        return null;
+    }
+
+    return list.filter((giveaway) => Boolean(giveaway?.messageId));
 }
 
 class PostgreSQLDatabase {
@@ -195,6 +223,25 @@ class PostgreSQLDatabase {
 
     isAvailable() {
         return this.isConnected && this.pool;
+    }
+
+    async withTransaction(work) {
+        const client = await this.pool.connect();
+        try {
+            await client.query('BEGIN');
+            const result = await work(client);
+            await client.query('COMMIT');
+            return result;
+        } catch (error) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                logger.warn('Failed to rollback PostgreSQL transaction:', rollbackError.message);
+            }
+            throw error;
+        } finally {
+            client.release();
+        }
     }
 
     getLastFailure() {
@@ -541,6 +588,10 @@ class PostgreSQLDatabase {
                 return false;
             }
 
+            if (!record || typeof record !== 'object') {
+                return false;
+            }
+
             const {
                 guildId,
                 userId,
@@ -663,11 +714,11 @@ class PostgreSQLDatabase {
                     // Map snake_case columns to the camelCase shape consumers expect
                     const levelRow = userLevelResult.rows[0];
                     return {
-                        xp: Number(levelRow.xp) || 0,
-                        level: Number(levelRow.level) || 0,
-                        totalXp: Number(levelRow.total_xp) || 0,
-                        lastMessage: Number(levelRow.last_message) || 0,
-                        rank: Number(levelRow.rank) || 0,
+                        xp: toPgInt(levelRow.xp),
+                        level: Math.min(toPgInt(levelRow.level), 1000),
+                        totalXp: toPgInt(levelRow.total_xp),
+                        lastMessage: toEpochMs(levelRow.last_message, 0),
+                        rank: toPgInt(levelRow.rank),
                     };
                 }
                 
@@ -679,10 +730,14 @@ class PostgreSQLDatabase {
                     if (economyResult.rows.length === 0) return defaultValue;
                     const row = economyResult.rows[0];
 
-                    if (row.data && typeof row.data === 'object' && Object.keys(row.data).length > 0) {
-                        return row.data;
+                    if (row.data && typeof row.data === 'object' && !Array.isArray(row.data) && Object.keys(row.data).length > 0) {
+                        return {
+                            ...row.data,
+                            wallet: toPgInt(row.balance ?? row.data.wallet ?? row.data.balance),
+                            bank: toPgInt(row.bank ?? row.data.bank),
+                        };
                     }
-                    return { wallet: row.balance ?? 0, bank: row.bank ?? 0 };
+                    return { wallet: toPgInt(row.balance), bank: toPgInt(row.bank) };
                 }
                 
                 case 'afk_status': {
@@ -734,57 +789,86 @@ class PostgreSQLDatabase {
                     );
                     return true;
                 
-                case 'guild_birthdays':
-                    await this.pool.query(
-                        `INSERT INTO ${pgConfig.tables.guilds} (id, created_at) 
-                         VALUES ($1, CURRENT_TIMESTAMP) 
-                         ON CONFLICT (id) DO NOTHING`,
-                        [parsedKey.guildId]
-                    );
-                    
-                    await this.pool.query(`DELETE FROM ${pgConfig.tables.birthdays} WHERE guild_id = $1`, [parsedKey.guildId]);
-                    
-                    for (const [userId, birthday] of Object.entries(value)) {
-                        await this.pool.query(
-                            `INSERT INTO ${pgConfig.tables.users} (id, created_at) 
-                             VALUES ($1, CURRENT_TIMESTAMP) 
+                case 'guild_birthdays': {
+                    const birthdayEntries = normalizeBirthdayEntries(value);
+                    if (!birthdayEntries) {
+                        return false;
+                    }
+                    if (Object.keys(value).length > 0 && birthdayEntries.length === 0) {
+                        return false;
+                    }
+
+                    return await this.withTransaction(async (client) => {
+                        await client.query(
+                            `INSERT INTO ${pgConfig.tables.guilds} (id, created_at)
+                             VALUES ($1, CURRENT_TIMESTAMP)
                              ON CONFLICT (id) DO NOTHING`,
-                            [userId]
+                            [parsedKey.guildId],
                         );
-                        
-                        await this.pool.query(
-                            `INSERT INTO ${pgConfig.tables.birthdays} (guild_id, user_id, month, day) 
-                             VALUES ($1, $2, $3, $4)`,
-                            [parsedKey.guildId, userId, birthday.month, birthday.day]
+                        await client.query(
+                            `DELETE FROM ${pgConfig.tables.birthdays} WHERE guild_id = $1`,
+                            [parsedKey.guildId],
                         );
-                    }
-                    return true;
-                
-                case 'guild_giveaways':
-                    await this.pool.query(
-                        `INSERT INTO ${pgConfig.tables.guilds} (id, created_at) 
-                         VALUES ($1, CURRENT_TIMESTAMP) 
-                         ON CONFLICT (id) DO NOTHING`,
-                        [parsedKey.guildId]
-                    );
-                    
-                    await this.pool.query(`DELETE FROM ${pgConfig.tables.giveaways} WHERE guild_id = $1`, [parsedKey.guildId]);
 
-                    const giveaways = Array.isArray(value)
-                        ? value
-                        : (value && typeof value === 'object' ? Object.values(value) : []);
-
-                    for (const giveaway of giveaways) {
-                        if (!giveaway?.messageId) {
-                            continue;
+                        for (const entry of birthdayEntries) {
+                            await client.query(
+                                `INSERT INTO ${pgConfig.tables.users} (id, created_at)
+                                 VALUES ($1, CURRENT_TIMESTAMP)
+                                 ON CONFLICT (id) DO NOTHING`,
+                                [entry.userId],
+                            );
+                            await client.query(
+                                `INSERT INTO ${pgConfig.tables.birthdays} (guild_id, user_id, month, day)
+                                 VALUES ($1, $2, $3, $4)`,
+                                [parsedKey.guildId, entry.userId, entry.month, entry.day],
+                            );
                         }
-                        await this.pool.query(
-                            `INSERT INTO ${pgConfig.tables.giveaways} (guild_id, message_id, data, ends_at) 
-                             VALUES ($1, $2, $3, $4)`,
-                            [parsedKey.guildId, giveaway.messageId, giveaway, giveaway.endsAt ? new Date(giveaway.endsAt) : null]
-                        );
+
+                        return true;
+                    });
+                }
+                
+                case 'guild_giveaways': {
+                    const giveawayEntries = normalizeGiveawayEntries(value);
+                    if (!giveawayEntries) {
+                        return false;
                     }
-                    return true;
+
+                    const sourceCount = Array.isArray(value)
+                        ? value.length
+                        : Object.keys(value).length;
+                    if (sourceCount > 0 && giveawayEntries.length === 0) {
+                        return false;
+                    }
+
+                    return await this.withTransaction(async (client) => {
+                        await client.query(
+                            `INSERT INTO ${pgConfig.tables.guilds} (id, created_at)
+                             VALUES ($1, CURRENT_TIMESTAMP)
+                             ON CONFLICT (id) DO NOTHING`,
+                            [parsedKey.guildId],
+                        );
+                        await client.query(
+                            `DELETE FROM ${pgConfig.tables.giveaways} WHERE guild_id = $1`,
+                            [parsedKey.guildId],
+                        );
+
+                        for (const giveaway of giveawayEntries) {
+                            await client.query(
+                                `INSERT INTO ${pgConfig.tables.giveaways} (guild_id, message_id, data, ends_at)
+                                 VALUES ($1, $2, $3, $4)`,
+                                [
+                                    parsedKey.guildId,
+                                    giveaway.messageId,
+                                    giveaway,
+                                    toSqlDateOrNull(giveaway.endsAt ?? giveaway.endTime),
+                                ],
+                            );
+                        }
+
+                        return true;
+                    });
+                }
                 
                 case 'welcome_config':
                     await this.pool.query(
@@ -834,14 +918,22 @@ class PostgreSQLDatabase {
                     );
 
                     const lastMessageValue = value?.lastMessage ?? value?.last_message;
-                    const normalizedLastMessage = normalizeTimestampInput(lastMessageValue, new Date());
+                    const normalizedLastMessage = toDate(lastMessageValue, new Date(0));
                     
                     await this.pool.query(
                         `INSERT INTO ${pgConfig.tables.user_levels} (guild_id, user_id, xp, level, total_xp, last_message, rank, updated_at) 
                          VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP) 
                          ON CONFLICT (guild_id, user_id) DO UPDATE SET 
                          xp = $3, level = $4, total_xp = $5, last_message = $6, rank = $7, updated_at = CURRENT_TIMESTAMP`,
-                        [parsedKey.guildId, parsedKey.userId, value.xp || 0, value.level || 0, value.totalXp || 0, normalizedLastMessage, value.rank || 0]
+                        [
+                            parsedKey.guildId,
+                            parsedKey.userId,
+                            toPgInt(value?.xp),
+                            Math.min(toPgInt(value?.level), 1000),
+                            toPgInt(value?.totalXp ?? value?.total_xp),
+                            normalizedLastMessage,
+                            toPgInt(value?.rank),
+                        ]
                     );
                     return true;
                 
@@ -860,12 +952,18 @@ class PostgreSQLDatabase {
                         [parsedKey.userId]
                     );
                     
+                    const wallet = toPgInt(value?.wallet ?? value?.balance);
+                    const bank = toPgInt(value?.bank);
+                    const payload = (value && typeof value === 'object' && !Array.isArray(value))
+                        ? { ...value, wallet, bank, balance: wallet }
+                        : { wallet, bank };
+
                     await this.pool.query(
                         `INSERT INTO ${pgConfig.tables.economy} (guild_id, user_id, balance, bank, data, updated_at) 
                          VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP) 
                          ON CONFLICT (guild_id, user_id) DO UPDATE SET 
                          balance = $3, bank = $4, data = $5, updated_at = CURRENT_TIMESTAMP`,
-                        [parsedKey.guildId, parsedKey.userId, value.wallet ?? value.balance ?? 0, value.bank ?? 0, value]
+                        [parsedKey.guildId, parsedKey.userId, wallet, bank, payload]
                     );
                     return true;
                 
@@ -889,7 +987,7 @@ class PostgreSQLDatabase {
                          VALUES ($1, $2, $3, $4) 
                          ON CONFLICT (guild_id, user_id) DO UPDATE SET 
                          reason = $3, expires_at = $4, status_at = CURRENT_TIMESTAMP`,
-                        [parsedKey.guildId, parsedKey.userId, value.reason, (value.expiresAt ?? value.expires_at) ? new Date(value.expiresAt ?? value.expires_at) : null]
+                        [parsedKey.guildId, parsedKey.userId, value?.reason, toSqlDateOrNull(value?.expiresAt ?? value?.expires_at)]
                     );
                     return true;
                 

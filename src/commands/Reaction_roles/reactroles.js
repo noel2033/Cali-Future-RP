@@ -12,6 +12,7 @@ import {
 } from '../../utils/panelStatus.js';
 import { startDashboardSession } from '../../utils/dashboardSession.js';
 import { getReactionRoleKey } from '../../utils/database/keys.js';
+import { hasPermission, botHasPermission } from '../../utils/permissionGuard.js';
 
 const DASHBOARD_EPHEMERAL = MessageFlags.Ephemeral;
 const SELECT_OPTION_LABEL_LIMIT = 100;
@@ -20,6 +21,24 @@ const SELECT_OPTION_DESCRIPTION_LIMIT = 100;
 function truncateText(value, maxLength) {
     const text = String(value ?? '');
     return text.length > maxLength ? text.substring(0, maxLength) : text;
+}
+
+function getPanelRoleIds(panelData) {
+    return Array.isArray(panelData?.roles) ? panelData.roles : [];
+}
+
+function cloneEmbedFields(embed) {
+    return Array.isArray(embed?.fields)
+        ? embed.fields.map((field) => ({ name: field.name, value: field.value, inline: field.inline }))
+        : [];
+}
+
+function roleHasUnsafePermissions(role) {
+    try {
+        return hasDangerousPermissions(role);
+    } catch {
+        return true;
+    }
 }
 
 export default {
@@ -164,7 +183,7 @@ async function handleSetup(interaction) {
         );
     }
 
-    if (!interaction.guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)) {
+    if (!hasPermission(interaction.guild.members?.me, PermissionFlagsBits.ManageRoles)) {
         throw createError(
             'Bot missing ManageRoles permission',
             ErrorTypes.PERMISSION,
@@ -173,7 +192,7 @@ async function handleSetup(interaction) {
         );
     }
     
-    if (!channel.permissionsFor(interaction.guild.members.me).has(PermissionFlagsBits.SendMessages)) {
+    if (!botHasPermission(channel, PermissionFlagsBits.SendMessages)) {
         throw createError(
             `Bot cannot send messages in ${channel.name}`,
             ErrorTypes.PERMISSION,
@@ -209,7 +228,7 @@ async function handleSetup(interaction) {
                 continue;
             }
             
-            if (hasDangerousPermissions(role)) {
+            if (roleHasUnsafePermissions(role)) {
                 roleValidationErrors.push(`**${role.name}** - This role has dangerous permissions (Administrator, Manage Server, etc.)`);
                 continue;
             }
@@ -367,9 +386,9 @@ async function rebuildLivePanelMessage(guild, panelData) {
         const channel = guild.channels.cache.get(panelData.channelId);
         if (!channel) return;
         const msg = await channel.messages.fetch(panelData.messageId).catch(() => null);
-        if (!msg || !msg.embeds[0]) return;
+        if (!msg?.embeds?.[0]) return;
 
-        const roleObjects = panelData.roles
+        const roleObjects = getPanelRoleIds(panelData)
             .map(id => guild.roles.cache.get(id))
             .filter(Boolean);
 
@@ -377,7 +396,7 @@ async function rebuildLivePanelMessage(guild, panelData) {
 
         const currentEmbed = msg.embeds[0];
         const updatedEmbed = EmbedBuilder.from(currentEmbed);
-        const fields = currentEmbed.fields.map(f => ({ name: f.name, value: f.value, inline: f.inline }));
+        const fields = cloneEmbedFields(currentEmbed);
         const roleFieldIdx = fields.findIndex(f => f.name === 'Available Roles');
         const newRoleValue = roleObjects.map(r => `• ${r}`).join('\n');
         if (roleFieldIdx !== -1) {
@@ -425,9 +444,10 @@ async function showPanelDashboard(interaction, panelData, discordMsg, guildId, g
 function buildReactionRoleDashboardPayload(panelData, discordMsg, guildId, guild, panelStatus = null) {
     const channel = guild.channels.cache.get(panelData.channelId);
     const title = discordMsg?.embeds?.[0]?.title ?? 'Untitled Panel';
+    const roleIds = getPanelRoleIds(panelData);
     const roleList =
-        panelData.roles.length > 0
-            ? panelData.roles.map(id => `<@&${id}>`).join(',')
+        roleIds.length > 0
+            ? roleIds.map(id => `<@&${id}>`).join(',')
             : '`None`';
 
     const showRepost = panelStatus?.exists === false && panelStatus?.reason === 'panel_deleted';
@@ -441,7 +461,7 @@ function buildReactionRoleDashboardPayload(panelData, discordMsg, guildId, guild
         .addFields(
             { name: 'Panel Status', value: formatPanelStatusField(panelStatus), inline: false },
             { name: 'Channel', value: channel ? `<#${channel.id}>` : '`Not found`', inline: true },
-            { name: 'Roles', value: `\`${panelData.roles.length} / 25\``, inline: true },
+            { name: 'Roles', value: `\`${roleIds.length} / 25\``, inline: true },
             { name: '\u200B', value: '\u200B', inline: true },
             { name: 'Role List', value: roleList, inline: false },
         )
@@ -482,7 +502,7 @@ function buildReactionRoleDashboardPayload(panelData, discordMsg, guildId, guild
                 .setDescription('Add a role to this panel (up to 25 total)')
                 .setValue('add_role')
                 .setEmoji('➕'),
-            ...(panelData.roles.length > 0
+            ...(roleIds.length > 0
                 ? [
                       new StringSelectMenuOptionBuilder()
                           .setLabel('Remove Role')
@@ -520,7 +540,7 @@ async function repostReactionRolePanel(guild, panelData, client, guildId, fallba
         );
     }
 
-    const roleObjects = panelData.roles.map(id => guild.roles.cache.get(id)).filter(Boolean);
+    const roleObjects = getPanelRoleIds(panelData).map(id => guild.roles.cache.get(id)).filter(Boolean);
     if (roleObjects.length === 0) {
         throw createError(
             'No valid roles',
@@ -571,7 +591,7 @@ async function handleDashboard(interaction, selectedPanelId) {
     const guild = interaction.guild;
 
     const panels = await getAllReactionRoleMessages(client, guildId);
-    if (!panels?.length) {
+    if (!Array.isArray(panels) || !panels.length) {
         throw createError(
             'No panels',
             ErrorTypes.CONFIGURATION,
@@ -591,6 +611,8 @@ async function handleDashboard(interaction, selectedPanelId) {
             );
         }
     }
+
+    panelData.roles = getPanelRoleIds(panelData);
 
     let panelStatus = await getReactionRolePanelStatus(client, guild, panelData);
     if (panelStatus.recoveredId) {
@@ -716,14 +738,16 @@ async function handleEditText(buttonInteraction, rootInteraction, panelData, gui
     const newDescription = submitted.fields.getTextInputValue('panel_description').trim();
 
     if (discordMsg) {
-        const roleObjects = panelData.roles
+        const roleObjects = getPanelRoleIds(panelData)
             .map(id => guild.roles.cache.get(id))
             .filter(Boolean);
-        const updatedEmbed = EmbedBuilder.from(discordMsg.embeds[0])
-            .setTitle(newTitle)
-            .setDescription(newDescription);
+        const currentEmbed = discordMsg.embeds?.[0];
+        const updatedEmbed = currentEmbed
+            ? EmbedBuilder.from(currentEmbed)
+            : new EmbedBuilder();
+        updatedEmbed.setTitle(newTitle).setDescription(newDescription);
         if (roleObjects.length > 0) {
-            const fields = discordMsg.embeds[0].fields?.map(f => ({ name: f.name, value: f.value, inline: f.inline })) || [];
+            const fields = cloneEmbedFields(currentEmbed);
             const roleFieldIdx = fields.findIndex(f => f.name === 'Available Roles');
             const newRoleValue = roleObjects.map(r => `• ${r}`).join('\n');
             if (roleFieldIdx !== -1) {
@@ -787,6 +811,13 @@ async function handleAddRole(selectInteraction, rootInteraction, panelData, guil
     roleCollector.on('collect', async roleInteraction => {
         await roleInteraction.deferUpdate();
         const role = roleInteraction.roles.first();
+        if (!role) {
+            await replyUserError(roleInteraction, {
+                type: ErrorTypes.VALIDATION,
+                message: 'No role was selected.',
+            });
+            return;
+        }
 
         if (panelData.roles.includes(role.id)) {
             await replyUserError(roleInteraction, {
@@ -809,14 +840,22 @@ async function handleAddRole(selectInteraction, rootInteraction, panelData, guil
             });
             return;
         }
-        if (hasDangerousPermissions(role)) {
+        if (roleHasUnsafePermissions(role)) {
             await replyUserError(roleInteraction, {
                 type: ErrorTypes.PERMISSION,
                 message: 'That role has sensitive permissions (Administrator, Manage Server, etc.) and cannot be used.',
             });
             return;
         }
-        if (role.position >= guild.members.me.roles.highest.position) {
+        const botMember = guild.members?.me;
+        if (!botMember) {
+            await replyUserError(roleInteraction, {
+                type: ErrorTypes.PERMISSION,
+                message: 'I could not verify my role hierarchy in this server. Please try again.',
+            });
+            return;
+        }
+        if (role.position >= botMember.roles.highest.position) {
             await replyUserError(roleInteraction, {
                 type: ErrorTypes.PERMISSION,
                 message: "That role is above my highest role in the hierarchy. Move my role above it first.",

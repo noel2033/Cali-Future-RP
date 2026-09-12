@@ -3,9 +3,20 @@
 import { EmbedBuilder } from 'discord.js';
 import { getColor, botConfig } from '../config/bot.js';
 
-const EMOJI_REGEX = /[\p{Extended_Pictographic}\uFE0F]/gu;
-const EMBED_FOOTER_SYMBOL = Symbol('titanbotFooterText');
-const EMBED_BASE_DESCRIPTION_SYMBOL = Symbol('titanbotBaseDescription');
+const DISCORD_TITLE_MAX = 256;
+const DISCORD_DESCRIPTION_MAX = 4096;
+const DISCORD_FOOTER_MAX = 2048;
+const DISCORD_AUTHOR_NAME_MAX = 256;
+const DISCORD_FIELD_NAME_MAX = 256;
+const DISCORD_FIELD_VALUE_MAX = 1024;
+const DISCORD_FIELD_MAX = 25;
+
+function clip(text, max) {
+  if (typeof text !== 'string' || !Number.isFinite(max) || max < 0) {
+    return text;
+  }
+  return text.length > max ? text.slice(0, max) : text;
+}
 
 function sanitizeEmbedText(text = '') {
   if (typeof text !== 'string') {
@@ -13,7 +24,6 @@ function sanitizeEmbedText(text = '') {
   }
 
   return text
-    .replace(EMOJI_REGEX, '')
     .replace(/[ \t]+/g, ' ')  // Replace consecutive spaces/tabs with single space
     .replace(/[ \t]\n/g, '\n')  // Remove spaces before newlines
     .replace(/\n[ \t]/g, '\n')  // Remove spaces after newlines
@@ -21,15 +31,26 @@ function sanitizeEmbedText(text = '') {
     .trim();
 }
 
+function nonEmptySanitizedText(text) {
+  const sanitized = sanitizeEmbedText(text);
+  return typeof sanitized === 'string' && sanitized.length > 0 ? sanitized : null;
+}
+
 function sanitizeEmbedField(field) {
   if (!field || typeof field !== 'object') {
-    return field;
+    return null;
+  }
+
+  const name = nonEmptySanitizedText(field.name);
+  const value = nonEmptySanitizedText(field.value);
+  if (!name || !value) {
+    return null;
   }
 
   return {
     ...field,
-    name: sanitizeEmbedText(field.name),
-    value: sanitizeEmbedText(field.value),
+    name: clip(name, DISCORD_FIELD_NAME_MAX),
+    value: clip(value, DISCORD_FIELD_VALUE_MAX),
   };
 }
 
@@ -38,18 +59,34 @@ const originalSetAuthor = EmbedBuilder.prototype.setAuthor;
 const originalAddFields = EmbedBuilder.prototype.addFields;
 
 EmbedBuilder.prototype.setTitle = function setSanitizedTitle(title) {
-  return originalSetTitle.call(this, sanitizeEmbedText(title));
+  const sanitized = nonEmptySanitizedText(title);
+  if (!sanitized) {
+    return this;
+  }
+  return originalSetTitle.call(this, clip(sanitized, DISCORD_TITLE_MAX));
 };
 
 EmbedBuilder.prototype.setAuthor = function setSanitizedAuthor(author) {
+  if (author == null) {
+    return this;
+  }
+
   if (typeof author === 'string') {
-    return originalSetAuthor.call(this, sanitizeEmbedText(author));
+    const name = nonEmptySanitizedText(author);
+    if (!name) {
+      return this;
+    }
+    return originalSetAuthor.call(this, { name: clip(name, DISCORD_AUTHOR_NAME_MAX) });
   }
 
   if (author && typeof author.name === 'string') {
+    const name = nonEmptySanitizedText(author.name);
+    if (!name) {
+      return this;
+    }
     return originalSetAuthor.call(this, {
       ...author,
-      name: sanitizeEmbedText(author.name),
+      name: clip(name, DISCORD_AUTHOR_NAME_MAX),
     });
   }
 
@@ -58,57 +95,78 @@ EmbedBuilder.prototype.setAuthor = function setSanitizedAuthor(author) {
 
 EmbedBuilder.prototype.addFields = function addSanitizedFields(...fields) {
   const normalized = fields.flatMap((field) => (Array.isArray(field) ? field : [field]));
-  const sanitized = normalized.map(sanitizeEmbedField);
-  return originalAddFields.call(this, sanitized);
+  const sanitized = normalized.map(sanitizeEmbedField).filter(Boolean).slice(0, DISCORD_FIELD_MAX);
+  if (sanitized.length === 0) {
+    return this;
+  }
+  try {
+    return originalAddFields.call(this, sanitized);
+  } catch {
+    return this;
+  }
 };
-
-function normalizeFooterText(footer) {
-  if (!footer) {
-    return '';
-  }
-
-  if (typeof footer === 'string') {
-    return footer.trim();
-  }
-
-  if (footer && typeof footer.text === 'string') {
-    return footer.text.trim();
-  }
-
-  return '';
-}
-
-function isImportantFooter(footerText) {
-  if (!footerText) {
-    return false;
-  }
-
-  const normalized = footerText.toLowerCase();
-  return /\b(close|closes|closed|expire|expires|available in|page\s+\d+|dashboard closes|ticket id)\b/.test(normalized);
-}
 
 const originalSetDescription = EmbedBuilder.prototype.setDescription;
 const originalSetFooter = EmbedBuilder.prototype.setFooter;
 const originalSetTimestamp = EmbedBuilder.prototype.setTimestamp;
 
-EmbedBuilder.prototype.setDescription = function(description = '') {
-  const descString = sanitizeEmbedText(description || '');
-  this[EMBED_BASE_DESCRIPTION_SYMBOL] = descString;
-  return originalSetDescription.call(this, descString);
+EmbedBuilder.prototype.setDescription = function setSanitizedDescription(description = '') {
+  const sanitized = nonEmptySanitizedText(description || '');
+  if (!sanitized) {
+    return this;
+  }
+  return originalSetDescription.call(this, clip(sanitized, DISCORD_DESCRIPTION_MAX));
 };
 
-EmbedBuilder.prototype.setFooter = function(footer) {
-  const footerText = sanitizeEmbedText(normalizeFooterText(footer));
-  if (!footerText || !isImportantFooter(footerText)) {
+EmbedBuilder.prototype.setFooter = function setSanitizedFooter(footer) {
+  if (footer == null) {
     return this;
   }
 
-  this[EMBED_FOOTER_SYMBOL] = footerText;
-  return originalSetFooter.call(this, { text: footerText });
+  if (typeof footer === 'string') {
+    const text = nonEmptySanitizedText(footer);
+    if (!text) {
+      return this;
+    }
+    return originalSetFooter.call(this, { text: clip(text, DISCORD_FOOTER_MAX) });
+  }
+
+  if (footer && typeof footer.text === 'string') {
+    const text = nonEmptySanitizedText(footer.text);
+    if (!text) {
+      return this;
+    }
+    return originalSetFooter.call(this, {
+      ...footer,
+      text: clip(text, DISCORD_FOOTER_MAX),
+    });
+  }
+
+  return originalSetFooter.call(this, footer);
 };
 
-EmbedBuilder.prototype.setTimestamp = function() {
-  return this;
+EmbedBuilder.prototype.setTimestamp = function setSafeTimestamp(timestamp) {
+  if (arguments.length === 0) {
+    return originalSetTimestamp.call(this);
+  }
+
+  if (timestamp instanceof Date) {
+    if (Number.isNaN(timestamp.getTime())) {
+      return this;
+    }
+    return originalSetTimestamp.call(this, timestamp);
+  }
+
+  if (timestamp == null) {
+    return originalSetTimestamp.call(this, timestamp);
+  }
+
+  const ms = typeof timestamp === 'number' ? timestamp : Date.parse(timestamp);
+  if (!Number.isFinite(ms)) {
+    return this;
+  }
+
+  return originalSetTimestamp.call(this, ms);
 };
 
 export function createEmbed({
@@ -211,7 +269,7 @@ export function createEmbed({
 
   if (timestamp === true) {
     embed.setTimestamp();
-  } else if (timestamp instanceof Date) {
+  } else if (timestamp instanceof Date && !Number.isNaN(timestamp.getTime())) {
     embed.setTimestamp(timestamp);
   }
 
@@ -336,15 +394,28 @@ export function warningEmbed(title, body = '') {
 }
 
 export function formatUser(user) {
-  return `${user} (${user.tag} | ${user.id})`;
+  if (!user) {
+    return 'Unknown';
+  }
+
+  const tag = user.tag ?? user.username ?? 'Unknown';
+  const id = user.id ?? 'unknown';
+  return `${user} (${tag} | ${id})`;
+}
+
+function toUnixSeconds(date) {
+  const time = date instanceof Date ? date.getTime() : Date.parse(date);
+  return Number.isFinite(time) ? Math.floor(time / 1000) : null;
 }
 
 export function formatDate(date) {
-  return `<t:${Math.floor(date.getTime() / 1000)}:F>`;
+  const seconds = toUnixSeconds(date);
+  return seconds == null ? 'Unknown' : `<t:${seconds}:F>`;
 }
 
 export function formatRelativeTime(date) {
-  return `<t:${Math.floor(date.getTime() / 1000)}:R>`;
+  const seconds = toUnixSeconds(date);
+  return seconds == null ? 'Unknown' : `<t:${seconds}:R>`;
 }
 
 export function formatCodeBlock(content, language = '') {
@@ -380,18 +451,23 @@ export function formatQuote(content) {
 }
 
 export function formatList(items, ordered = false) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return '';
+  }
+
   return items
     .map((item, index) => (ordered ? `${index + 1}.` : '•') + `${item}`)
     .join('\n');
 }
 
 export function formatDuration(ms) {
-  if (ms < 0) return '0s';
+  const duration = Number(ms);
+  if (!Number.isFinite(duration) || duration < 0) return '0s';
 
-  const seconds = Math.floor(ms / 1000) % 60;
-  const minutes = Math.floor(ms / (1000 * 60)) % 60;
-  const hours = Math.floor(ms / (1000 * 60 * 60)) % 24;
-  const days = Math.floor(ms / (1000 * 60 * 60 * 24));
+  const seconds = Math.floor(duration / 1000) % 60;
+  const minutes = Math.floor(duration / (1000 * 60)) % 60;
+  const hours = Math.floor(duration / (1000 * 60 * 60)) % 24;
+  const days = Math.floor(duration / (1000 * 60 * 60 * 24));
 
   const parts = [];
   if (days > 0) parts.push(`${days}d`);
@@ -403,8 +479,15 @@ export function formatDuration(ms) {
 }
 
 export function formatProgressBar(current, max, size = 10) {
-  const progress = Math.min(Math.max(0, current / max), 1);
-  const filled = Math.round(size * progress);
-  const empty = size - filled;
+  const barSize = Number.isInteger(size) && size > 0 ? size : 10;
+  const safeCurrent = Number(current);
+  const safeMax = Number(max);
+  if (!Number.isFinite(safeCurrent) || !Number.isFinite(safeMax) || safeMax <= 0) {
+    return `[${'░'.repeat(barSize)}] 0%`;
+  }
+
+  const progress = Math.min(Math.max(0, safeCurrent / safeMax), 1);
+  const filled = Math.round(barSize * progress);
+  const empty = barSize - filled;
   return `[${'█'.repeat(filled)}${'░'.repeat(empty)}] ${Math.round(progress * 100)}%`;
 }

@@ -1,9 +1,8 @@
 // messageAdapter.js
 
 import { mapArgumentsToOptions } from './prefixParser.js';
-import { createEmbed } from './embeds.js';
+import { getCommandJson } from './commandJson.js';
 import { handleInteractionError } from './errorHandler.js';
-import { logger } from './logger.js';
 import { InteractionHelper } from './interactionHelper.js';
 import { SLASH_ONLY_COMMANDS } from '../config/commands/prefixRestrictions.js';
 import { getCommandPrefix } from '../config/bot.js';
@@ -12,27 +11,71 @@ import { enforceDefaultCommandPermissions } from './permissionGuard.js';
 
 export { buildPrefixUsage };
 
-function getCommandJson(commandData) {
-  return commandData?.toJSON ? commandData.toJSON() : commandData;
+function emptyPrefixOptions(args) {
+  return {
+    _positional: args,
+    get: (name) => args[0] || null,
+    getString: (name) => args[0] || null,
+    getUser: () => null,
+    getInteger: () => parseInt(args[0], 10) || null,
+    getBoolean: () => args[0] === 'true',
+    getSubcommand: () => null,
+    getSubcommandGroup: () => null,
+    validateRequired: () => ({ valid: true, missing: [] }),
+  };
+}
+
+function safeMapArgumentsToOptions(args, commandData) {
+  try {
+    return mapArgumentsToOptions(args, commandData);
+  } catch {
+    return emptyPrefixOptions(args);
+  }
+}
+
+function asSnowflake(value, mentionPattern) {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value === 'object' && value.id != null) {
+    return String(value.id);
+  }
+
+  const text = String(value);
+  const mentionMatch = text.match(mentionPattern);
+  return mentionMatch ? mentionMatch[1] : text;
 }
 
 export function resolveSlashAccessKey(interaction) {
-  const subcommandGroup = interaction.options.getSubcommandGroup(false);
-  const subcommand = interaction.options.getSubcommand(false);
-
-  if (subcommandGroup && subcommand) {
-    return `${interaction.commandName} ${subcommandGroup} ${subcommand}`;
+  if (!interaction) {
+    return null;
   }
 
-  if (subcommand) {
-    return `${interaction.commandName} ${subcommand}`;
+  try {
+    const subcommandGroup = interaction.options?.getSubcommandGroup?.(false) ?? null;
+    const subcommand = interaction.options?.getSubcommand?.(false) ?? null;
+
+    if (subcommandGroup && subcommand) {
+      return `${interaction.commandName} ${subcommandGroup} ${subcommand}`;
+    }
+
+    if (subcommand) {
+      return `${interaction.commandName} ${subcommand}`;
+    }
+  } catch {
+    return interaction.commandName ?? null;
   }
 
   return interaction.commandName;
 }
 
 export function resolvePrefixAccessKey(commandData, args) {
-  const options = mapArgumentsToOptions(args, commandData);
+  if (!commandData) {
+    return null;
+  }
+
+  const options = safeMapArgumentsToOptions(Array.isArray(args) ? args : [], commandData);
   const subcommand = options.getSubcommand();
   const subcommandGroup = options.getSubcommandGroup();
   const commandName = getCommandJson(commandData)?.name;
@@ -53,7 +96,8 @@ export function resolvePrefixAccessKey(commandData, args) {
 }
 
 export function createMockInteraction(message, commandData, args) {
-  const options = mapArgumentsToOptions(args, commandData);
+  const argv = Array.isArray(args) ? args : [];
+  const options = safeMapArgumentsToOptions(argv, commandData || {});
   const commandStartTime = Date.now();
 
   const mockInteraction = {
@@ -75,13 +119,10 @@ export function createMockInteraction(message, commandData, args) {
       get: (name) => options.get(name),
       getString: (name) => options.getString(name),
       getUser: (name) => {
-        const userId = options.getUser(name);
-        if (!userId || !message.guild) return null;
+        const id = asSnowflake(options.getUser(name), /<@!?(\d+)>/);
+        if (!id || !message.guild) return null;
 
-        const mentionMatch = userId.match(/<@!?(\d+)>/);
-        const id = mentionMatch ? mentionMatch[1] : userId;
-
-        const cachedMember = message.guild.members.cache.get(id);
+        const cachedMember = message.guild.members?.cache?.get(id);
         if (cachedMember) {
           return cachedMember.user;
         }
@@ -94,38 +135,32 @@ export function createMockInteraction(message, commandData, args) {
         };
       },
       getMember: (name) => {
-        const userId = options.getUser(name);
-        if (!userId || !message.guild) return null;
+        const id = asSnowflake(options.getUser(name), /<@!?(\d+)>/);
+        if (!id || !message.guild) return null;
 
-        const mentionMatch = userId.match(/<@!?(\d+)>/);
-        const id = mentionMatch ? mentionMatch[1] : userId;
-
-        return message.guild.members.cache.get(id) ?? null;
+        return message.guild.members?.cache?.get(id) ?? null;
       },
       getChannel: (name) => {
-        const channelId = options.getString(name);
-        if (!channelId || !message.guild) return null;
+        const id = asSnowflake(options.getString(name) ?? options.getChannel?.(name), /<#(\d+)>/);
+        if (!id || !message.guild) return null;
 
-        const mentionMatch = channelId.match(/<#(\d+)>/);
-        const id = mentionMatch ? mentionMatch[1] : channelId;
-
-        return message.guild.channels.fetch(id).catch(() => null);
+        return message.guild.channels?.cache?.get(id) ?? null;
       },
       getRole: (name) => {
-        const roleId = options.getString(name);
-        if (!roleId || !message.guild) return null;
+        const id = asSnowflake(options.getString(name) ?? options.getRole?.(name), /<@&(\d+)>/);
+        if (!id || !message.guild) return null;
 
-        const mentionMatch = roleId.match(/<@&(\d+)>/);
-        const id = mentionMatch ? mentionMatch[1] : roleId;
-
-        return message.guild.roles.fetch(id).catch(() => null);
+        return message.guild.roles?.cache?.get(id) ?? null;
       },
-      getInteger: (name) => options.getInteger(name),
+      getInteger: (name) => {
+        const value = options.getInteger(name);
+        return Number.isFinite(value) ? value : null;
+      },
       getBoolean: (name) => options.getBoolean(name),
       getSubcommand: () => options.getSubcommand(),
       getSubcommandGroup: () => options.getSubcommandGroup(),
       validateRequired: () => options.validateRequired(),
-      _hoistedOptions: args.map((arg, index) => ({
+      _hoistedOptions: argv.map((arg, index) => ({
         name: commandData?.options?.[index]?.name || `arg${index}`,
         value: arg,
         type: 3,
@@ -172,6 +207,10 @@ export function createMockInteraction(message, commandData, args) {
 }
 
 export function supportsPrefixExecution(command) {
+  if (!command) {
+    return false;
+  }
+
   if (command.prefixOnly === false || command.slashOnly === true) {
     return false;
   }
@@ -189,11 +228,16 @@ export function supportsPrefixExecution(command) {
 }
 
 export async function executePrefixCommand(command, message, args, client, prefixOverride = null, guildConfig = null) {
-  const mockInteraction = createMockInteraction(message, command.data, args);
-  const coordinator = mockInteraction._responseCoordinator;
-  const prefix = prefixOverride || getCommandPrefix();
+  if (!command || !message) {
+    return;
+  }
 
+  let mockInteraction;
   try {
+    mockInteraction = createMockInteraction(message, command.data, args);
+    const coordinator = mockInteraction._responseCoordinator;
+    const prefix = prefixOverride || getCommandPrefix();
+
     const permissionAllowed = await enforceDefaultCommandPermissions(mockInteraction, command, {
       source: 'messageAdapter.executePrefixCommand',
       guildConfig,
@@ -214,6 +258,9 @@ export async function executePrefixCommand(command, message, args, client, prefi
       await command.execute(mockInteraction, guildConfig, client);
     }
   } catch (error) {
+    if (!mockInteraction) {
+      return;
+    }
     await handleInteractionError(mockInteraction, error, {
       type: 'prefix_command',
       command: command.data?.name,

@@ -3,6 +3,7 @@
 import { ChannelType } from 'discord.js';
 import { getGuildConfig, updateGuildConfig } from './config/guildConfig.js';
 import { logger } from '../utils/logger.js';
+import { botHasPermission } from '../utils/permissionGuard.js';
 import {
   appendContentSection,
   buildLogDescription,
@@ -205,8 +206,8 @@ export async function logEvent({
   channelId: overrideChannelId = null,
 }) {
   try {
-    const guild = client.guilds.cache.get(guildId) ||
-      await client.guilds.fetch(guildId).catch(() => null);
+    const guild = client?.guilds?.cache?.get(guildId) ||
+      await client?.guilds?.fetch?.(guildId).catch(() => null);
 
     if (!guild) {
       logger.warn(`logEvent: Guild not found: ${guildId}`);
@@ -216,10 +217,10 @@ export async function logEvent({
     const config = await getGuildConfig(client, guildId);
     const ignore = getIgnoreList(config);
 
-    if (data?.userId && ignore.users?.includes(data.userId)) {
+    if (data?.userId && Array.isArray(ignore.users) && ignore.users.includes(data.userId)) {
       return null;
     }
-    if (data?.channelId && ignore.channels?.includes(data.channelId)) {
+    if (data?.channelId && Array.isArray(ignore.channels) && ignore.channels.includes(data.channelId)) {
       return null;
     }
 
@@ -240,8 +241,7 @@ export async function logEvent({
       return null;
     }
 
-    const permissions = channel.permissionsFor(guild.members.me);
-    if (!permissions || !permissions.has(['SendMessages', 'EmbedLinks'])) {
+    if (!botHasPermission(channel, ['SendMessages', 'EmbedLinks'])) {
       logger.warn(`logEvent: Missing permissions in channel ${logChannelId}`);
       return null;
     }
@@ -252,7 +252,7 @@ export async function logEvent({
     if (content) {
       messageOptions.content = content;
     }
-    if (attachments.length > 0) {
+    if (Array.isArray(attachments) && attachments.length > 0) {
       messageOptions.files = attachments;
     }
 
@@ -266,28 +266,30 @@ export async function logEvent({
 }
 
 function createLogEmbed(guild, eventType, data) {
-  const color = data.color ?? EVENT_COLORS[eventType] ?? 0x0099ff;
+  const payload = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  const color = payload.color ?? EVENT_COLORS[eventType] ?? 0x0099ff;
   const icon = EVENT_ICONS[eventType] || '📌';
-  const title = data.title || `${icon} ${formatEventType(eventType)}`;
+  const title = payload.title || `${icon} ${formatEventType(eventType)}`;
 
   const inlineFields = [];
-  let description = data.description || '';
+  let description = payload.description || '';
+  const meta = Array.isArray(payload.meta) ? payload.meta : [];
 
-  if (data.lines?.length) {
+  if (Array.isArray(payload.lines) && payload.lines.length) {
     description = buildLogDescription({
-      headline: data.headline || description || undefined,
-      lines: data.lines,
-      quoted: data.quoted !== false,
-      meta: data.meta,
+      headline: payload.headline || description || undefined,
+      lines: payload.lines,
+      quoted: payload.quoted !== false,
+      meta,
     });
 
-    if (data.fields?.length) {
-      const { before, after } = splitComparisonFields(data.fields);
+    if (Array.isArray(payload.fields) && payload.fields.length) {
+      const { before, after } = splitComparisonFields(payload.fields);
       if (before !== null) inlineFields.push({ name: 'Before', value: before, inline: true });
       if (after !== null) inlineFields.push({ name: 'After', value: after, inline: true });
     }
-  } else if (data.fields?.length) {
-    const { before, after, rest } = splitComparisonFields(data.fields);
+  } else if (Array.isArray(payload.fields) && payload.fields.length) {
+    const { before, after, rest } = splitComparisonFields(payload.fields);
 
     if (before !== null || after !== null) {
       const metaLines = fieldsToLines(rest);
@@ -306,35 +308,35 @@ function createLogEmbed(guild, eventType, data) {
     } else {
       description = buildLogDescription({
         headline: description || undefined,
-        lines: fieldsToLines(data.fields),
-        quoted: data.quoted ?? !description,
+        lines: fieldsToLines(payload.fields),
+        quoted: payload.quoted ?? !description,
       });
     }
-  } else if (data.meta?.length) {
+  } else if (meta.length) {
     description = buildLogDescription({
       headline: description || undefined,
-      meta: data.meta,
+      meta,
     });
   }
 
-  if (data.section?.body) {
-    description = appendContentSection(description, data.section.title || 'Message', data.section.body);
+  if (payload.section?.body) {
+    description = appendContentSection(description, payload.section.title || 'Message', payload.section.body);
   }
 
-  if (data.inlineFields?.length) {
-    inlineFields.push(...data.inlineFields);
+  if (Array.isArray(payload.inlineFields) && payload.inlineFields.length) {
+    inlineFields.push(...payload.inlineFields);
   }
 
   return buildStandardLogEmbed({
     color,
     title,
     description: description || undefined,
-    thumbnail: data.thumbnail || undefined,
+    thumbnail: payload.thumbnail || undefined,
     inlineFields,
-    fields: data.blockFields || [],
-    author: data.author || null,
+    fields: Array.isArray(payload.blockFields) ? payload.blockFields : [],
+    author: payload.author || null,
     timestamp: true,
-    footer: data.footer || { text: guild.name, iconURL: guild.iconURL({ dynamic: true }) || undefined },
+    footer: payload.footer || { text: guild.name, iconURL: guild.iconURL({ dynamic: true }) || undefined },
   });
 }
 
@@ -370,6 +372,9 @@ export async function toggleEventLogging(client, guildId, eventTypes, enabled) {
     const types = Array.isArray(eventTypes) ? eventTypes : [eventTypes];
 
     types.forEach((type) => {
+      if (typeof type !== 'string' || type.length === 0) {
+        return;
+      }
       if (type.endsWith('.*')) {
         const category = type.replace('.*', '');
         const matchingTypes = Object.values(EVENT_TYPES).filter(
@@ -438,7 +443,7 @@ export async function updateIgnoreList(client, guildId, { action, type, id }) {
     const config = await getGuildConfig(client, guildId);
     const ignore = { ...getIgnoreList(config) };
     const listKey = type === 'user' ? 'users' : 'channels';
-    const current = [...(ignore[listKey] || [])];
+    const current = Array.isArray(ignore[listKey]) ? [...ignore[listKey]] : [];
 
     if (action === 'add' && !current.includes(id)) {
       current.push(id);
