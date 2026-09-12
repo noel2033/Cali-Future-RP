@@ -17,9 +17,9 @@ import {
 import { loadCommands } from '../src/handlers/loaders/commandLoader.js';
 import loadEvents from '../src/handlers/loaders/events.js';
 import loadInteractions from '../src/handlers/loaders/interactions.js';
-import { initializeDatabase, getXpForLevel as dbGetXpForLevel } from '../src/utils/database.js';
+import { initializeDatabase, getXpForLevel as dbGetXpForLevel, getLeaderboard as dbGetLeaderboard } from '../src/utils/database.js';
 import { getUserLevelKey, getEconomyKey } from '../src/utils/database/keys.js';
-import { getXpForLevel, getLevelFromXp, MAX_LEVEL } from '../src/services/leveling/leveling.js';
+import { getXpForLevel, getLevelFromXp, getUserLevelData, getLeaderboard, MAX_LEVEL } from '../src/services/leveling/leveling.js';
 import { createMockInteraction, resolveSlashAccessKey, resolvePrefixAccessKey, supportsPrefixExecution } from '../src/utils/messageAdapter.js';
 
 const failures = [];
@@ -100,6 +100,68 @@ async function checkLevelCurve() {
     negativeThrew = true;
   }
   assert(negativeThrew, 'getXpForLevel still rejects negative levels');
+}
+
+async function checkLevelStorage() {
+  const iso = '2026-07-28T13:16:39.000Z';
+  const mapped = await getUserLevelData(
+    {
+      db: {
+        async get() {
+          return {
+            xp: '12',
+            level: '3',
+            total_xp: 200,
+            last_message: iso,
+            rank: 1,
+          };
+        },
+      },
+    },
+    'guild-1',
+    'user-1',
+  );
+  assert(mapped.xp === 12, 'getUserLevelData coerces string XP');
+  assert(mapped.level === 3, 'getUserLevelData coerces string level');
+  assert(mapped.totalXp === 200, 'getUserLevelData reads snake_case total_xp');
+  assert(mapped.lastMessage === Date.parse(iso), 'getUserLevelData reads snake_case last_message as epoch ms');
+
+  const client = {
+    guilds: {
+      cache: {
+        get() {
+          return {
+            members: {
+              async fetch() {
+                return new Map([
+                  ['ok-user', { user: { bot: false, username: 'ok', discriminator: '0' } }],
+                  ['bad-user', { user: { bot: false, username: 'bad', discriminator: '0' } }],
+                ]);
+              },
+            },
+          };
+        },
+      },
+    },
+    db: {
+      async get(key) {
+        if (String(key).includes('bad-user')) {
+          throw new Error('row corrupted');
+        }
+        return { xp: 10, level: 1, totalXp: 100, lastMessage: 0, rank: 1 };
+      },
+    },
+  };
+
+  const rows = await getLeaderboard(client, 'guild-1', 10);
+  assert(rows.length === 1, 'leaderboard skips users whose level rows fail to load');
+  assert(rows[0].userId === 'ok-user', 'leaderboard keeps the successful user');
+
+  const missingClient = await getLeaderboard(null, 'guild-1', 10);
+  assert(Array.isArray(missingClient) && missingClient.length === 0, 'getLeaderboard returns [] when client is null');
+
+  const facadeMissingClient = await dbGetLeaderboard(null, 'guild-1', 10);
+  assert(Array.isArray(facadeMissingClient) && facadeMissingClient.length === 0, 'database facade getLeaderboard returns [] when client is null');
 }
 
 async function checkEmbeds() {
@@ -415,6 +477,7 @@ async function checkPostgresRoundTrip() {
 
 await checkTimestamps();
 await checkLevelCurve();
+await checkLevelStorage();
 await checkEmbeds();
 await checkPermissions();
 await checkDatabaseFacade();

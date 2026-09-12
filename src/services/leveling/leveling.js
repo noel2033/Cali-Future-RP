@@ -98,7 +98,7 @@ export async function getLeaderboard(client, guildId, limit = 10) {
     if (safeLimit < 1) safeLimit = 10;
     if (safeLimit > 100) safeLimit = 100;
 
-    const guild = client.guilds.cache.get(guildId);
+    const guild = client?.guilds?.cache?.get(guildId);
     if (!guild) {
       logger.warn(`Guild ${guildId} not found in cache`);
       return [];
@@ -112,16 +112,20 @@ export async function getLeaderboard(client, guildId, limit = 10) {
     const leaderboard = [];
     
     for (const [userId, member] of members) {
-      if (member.user.bot) continue;
-      
-      const data = await getUserLevelData(client, guildId, userId);
-      if (data && (data.totalXp > 0 || data.level > 0)) {
-        leaderboard.push({
-          userId,
-          username: member.user.username,
-          discriminator: member.user.discriminator,
-          ...data
-        });
+      if (member?.user?.bot) continue;
+
+      try {
+        const data = await getUserLevelData(client, guildId, userId);
+        if (data && (data.totalXp > 0 || data.level > 0)) {
+          leaderboard.push({
+            userId,
+            username: member.user?.username,
+            discriminator: member.user?.discriminator,
+            ...data
+          });
+        }
+      } catch (error) {
+        logger.error(`Error getting leaderboard data for user ${userId} in guild ${guildId}:`, error);
       }
     }
     

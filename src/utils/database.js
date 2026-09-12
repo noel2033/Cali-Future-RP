@@ -546,7 +546,7 @@ export function getXpForLevel(level) {
 
 export async function getLeaderboard(client, guildId, limit = 10) {
     try {
-        if (!client.db || typeof client.db.list !== "function") {
+        if (!client?.db || typeof client.db.list !== "function") {
             logger.error("Database client is not available for getLeaderboard.");
             return [];
         }
