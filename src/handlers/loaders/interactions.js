@@ -3,6 +3,7 @@ import { join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { dirname } from 'path';
 import { logger } from '../../utils/logger.js';
+import { applyComponentAccessMeta } from '../../utils/componentAccess.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -39,6 +40,7 @@ export default async (client) => {
         for (const filePath of interactionFiles) {
           const relativePath = filePath.slice(interactionsPath.length + 1).replace(/\\/g, '/');
           const fileName = relativePath.split('/').pop();
+          const folder = relativePath.split('/')[1];
 
           try {
             const module = await import(pathToFileURL(filePath).href);
@@ -51,6 +53,7 @@ export default async (client) => {
                 continue;
               }
 
+              applyComponentAccessMeta(interaction, folder, interaction.name);
               client[type].set(interaction.name, interaction);
               loadedCount += 1;
               logger.info(`Loaded ${type.slice(0, -1)}: ${interaction.name} (${fileName})`);
