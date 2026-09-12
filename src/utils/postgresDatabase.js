@@ -664,10 +664,14 @@ class PostgreSQLDatabase {
                     if (economyResult.rows.length === 0) return defaultValue;
                     const row = economyResult.rows[0];
 
-                    if (row.data && typeof row.data === 'object' && Object.keys(row.data).length > 0) {
-                        return row.data;
+                    if (row.data && typeof row.data === 'object' && !Array.isArray(row.data) && Object.keys(row.data).length > 0) {
+                        return {
+                            ...row.data,
+                            wallet: toPgInt(row.balance ?? row.data.wallet ?? row.data.balance),
+                            bank: toPgInt(row.bank ?? row.data.bank),
+                        };
                     }
-                    return { wallet: row.balance ?? 0, bank: row.bank ?? 0 };
+                    return { wallet: toPgInt(row.balance), bank: toPgInt(row.bank) };
                 }
                 
                 case 'afk_status': {
@@ -861,12 +865,18 @@ class PostgreSQLDatabase {
                         [parsedKey.userId]
                     );
                     
+                    const wallet = toPgInt(value?.wallet ?? value?.balance);
+                    const bank = toPgInt(value?.bank);
+                    const payload = (value && typeof value === 'object' && !Array.isArray(value))
+                        ? { ...value, wallet, bank, balance: wallet }
+                        : { wallet, bank };
+
                     await this.pool.query(
                         `INSERT INTO ${pgConfig.tables.economy} (guild_id, user_id, balance, bank, data, updated_at) 
                          VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP) 
                          ON CONFLICT (guild_id, user_id) DO UPDATE SET 
                          balance = $3, bank = $4, data = $5, updated_at = CURRENT_TIMESTAMP`,
-                        [parsedKey.guildId, parsedKey.userId, toPgInt(value?.wallet ?? value?.balance), toPgInt(value?.bank), value ?? {}]
+                        [parsedKey.guildId, parsedKey.userId, wallet, bank, payload]
                     );
                     return true;
                 

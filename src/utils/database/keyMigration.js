@@ -63,9 +63,11 @@ async function ensureParentRows(client, guildId, userId) {
 
 async function migrateEconomyFromTemp(client, legacyKey, value) {
     const parsed = parseKey(canonicalizeKey(legacyKey));
-    const payload = typeof value === 'string' ? JSON.parse(value) : value;
-    const wallet = toPgInt(payload?.wallet ?? payload?.balance);
-    const bank = toPgInt(payload?.bank);
+    const parsedValue = typeof value === 'string' ? JSON.parse(value) : value;
+    const payload = parsedValue && typeof parsedValue === 'object' && !Array.isArray(parsedValue) ? parsedValue : {};
+    const wallet = toPgInt(payload.wallet ?? payload.balance);
+    const bank = toPgInt(payload.bank);
+    const storedPayload = { ...payload, wallet, bank, balance: wallet };
 
     await ensureParentRows(client, parsed.guildId, parsed.userId);
     await client.query(
@@ -76,7 +78,7 @@ async function migrateEconomyFromTemp(client, legacyKey, value) {
            bank = EXCLUDED.bank,
            data = EXCLUDED.data,
            updated_at = CURRENT_TIMESTAMP`,
-        [parsed.guildId, parsed.userId, wallet, bank, JSON.stringify(payload ?? {})],
+        [parsed.guildId, parsed.userId, wallet, bank, JSON.stringify(storedPayload)],
     );
 }
 

@@ -524,6 +524,11 @@ async function checkPostgresRoundTrip() {
     await db.set(economyKey, { wallet: 50, bank: 25 });
     const economyRow = await db.get(economyKey);
     assert(economyRow?.wallet === 50 && economyRow?.bank === 25, 'Postgres economy wallet/bank persist');
+
+    await db.set(economyKey, { wallet: 3e15, bank: 3e15 });
+    const clampedEconomy = await db.get(economyKey);
+    assert(clampedEconomy?.wallet === 2147483647, 'Postgres economy wallet clamps to INTEGER max');
+    assert(clampedEconomy?.bank === 2147483647, 'Postgres economy bank clamps to INTEGER max');
   } finally {
     await db.delete(levelKey).catch(() => {});
     await db.delete(economyKey).catch(() => {});
