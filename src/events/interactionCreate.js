@@ -37,6 +37,12 @@ const COMMAND_ERROR_SUBTYPES = {
   greroll: 'giveaway_failed',
 };
 
+const UNKNOWN_DISCORD_ENTITY_CODES = new Set([10003, 10008]);
+
+function isUnknownDiscordEntityError(error) {
+  return UNKNOWN_DISCORD_ENTITY_CODES.has(error?.code);
+}
+
 function withTraceContext(context = {}, traceContext = {}) {
   return {
     traceId: traceContext.traceId,
@@ -294,16 +300,54 @@ export default {
                 if (!panel.messageId || !panel.channelId) {
                   continue;
                 }
-                
-                const channel = guild.channels.cache.get(panel.channelId);
+
+                let channel = guild.channels.cache.get(panel.channelId);
                 if (!channel) {
-                  await deleteReactionRoleMessage(client, guildId, panel.messageId).catch(() => {});
+                  let channelMissing = false;
+                  channel = await guild.channels.fetch(panel.channelId).catch((error) => {
+                    if (isUnknownDiscordEntityError(error)) {
+                      channelMissing = true;
+                      return null;
+                    }
+                    logger.debug('Skipping reactroles panel after channel fetch failure', {
+                      guildId,
+                      channelId: panel.channelId,
+                      error: error?.message,
+                    });
+                    return undefined;
+                  });
+                  if (channel === undefined) {
+                    continue;
+                  }
+                  if (!channel && channelMissing) {
+                    await deleteReactionRoleMessage(client, guildId, panel.messageId).catch(() => {});
+                    continue;
+                  }
+                  if (!channel) {
+                    continue;
+                  }
+                }
+
+                let messageMissing = false;
+                const msg = await channel.messages.fetch(panel.messageId).catch((error) => {
+                  if (isUnknownDiscordEntityError(error)) {
+                    messageMissing = true;
+                    return null;
+                  }
+                  logger.debug('Skipping reactroles panel after message fetch failure', {
+                    guildId,
+                    messageId: panel.messageId,
+                    error: error?.message,
+                  });
+                  return undefined;
+                });
+                if (msg === undefined) {
                   continue;
                 }
-                
-                const msg = await channel.messages.fetch(panel.messageId).catch(() => null);
                 if (!msg) {
-                  await deleteReactionRoleMessage(client, guildId, panel.messageId).catch(() => {});
+                  if (messageMissing) {
+                    await deleteReactionRoleMessage(client, guildId, panel.messageId).catch(() => {});
+                  }
                   continue;
                 }
                 validPanels.push(panel);

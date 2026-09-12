@@ -25,7 +25,9 @@ import { getXpForLevel, getLevelFromXp, getUserLevelData, getLeaderboard, MAX_LE
 import { createMockInteraction, resolveSlashAccessKey, resolvePrefixAccessKey, supportsPrefixExecution, executePrefixCommand } from '../src/utils/messageAdapter.js';
 import { mapArgumentsToOptions } from '../src/utils/prefixParser.js';
 import { getPrefixRestriction } from '../src/config/commands/prefixRestrictions.js';
-import { isGiveawayEnded } from '../src/utils/giveaways.js';
+import { isGiveawayEnded, saveGiveaway } from '../src/utils/giveaways.js';
+import { hasDangerousPermissions } from '../src/services/reactionRoleService.js';
+import ApplicationService from '../src/services/applicationService.js';
 import { resolveComponentAccessMeta, isComponentAllowed } from '../src/utils/componentAccess.js';
 import { buildCommandRegistry, isCommandEnabledInConfig } from '../src/services/commandAccessService.js';
 import { getCommandJson, getCommandOptions } from '../src/utils/commandJson.js';
@@ -638,6 +640,64 @@ async function checkRemainingStabilizers() {
     loadNullThrew = true;
   }
   assert(loadNullThrew, 'loadCommands fails closed without a client');
+
+  const banOnlyRole = {
+    permissions: {
+      has(permission) {
+        return permission === 'BanMembers';
+      },
+    },
+  };
+  assert(hasDangerousPermissions(banOnlyRole) === true, 'roles with any dangerous permission are blocked from self-assign');
+
+  ApplicationService.checkApplicationCooldown('smoke-user');
+  let secondCooldownThrew = false;
+  try {
+    ApplicationService.checkApplicationCooldown('smoke-user');
+  } catch {
+    secondCooldownThrew = true;
+  }
+  assert(!secondCooldownThrew, 'failed application checks do not start the submit cooldown');
+  ApplicationService.markApplicationCooldown('smoke-user');
+  let markedCooldownThrew = false;
+  try {
+    ApplicationService.checkApplicationCooldown('smoke-user');
+  } catch {
+    markedCooldownThrew = true;
+  }
+  assert(markedCooldownThrew, 'successful application submits start the cooldown');
+
+  const giveawayStore = {
+    1: { messageId: '1', ended: true, isEnded: true, participants: ['a'], prize: 'x' },
+  };
+  const giveawayClient = {
+    db: {
+      async get() {
+        return giveawayStore;
+      },
+      async set(_key, value) {
+        Object.keys(giveawayStore).forEach((key) => {
+          delete giveawayStore[key];
+        });
+        Object.assign(giveawayStore, value);
+        return true;
+      },
+    },
+  };
+  let unendThrew = false;
+  try {
+    await saveGiveaway(giveawayClient, 'g1', {
+      messageId: '1',
+      ended: false,
+      participants: ['a', 'b'],
+      prize: 'x',
+    });
+  } catch {
+    unendThrew = true;
+  }
+  assert(unendThrew, 'saveGiveaway refuses to revive an ended giveaway');
+  assert(giveawayStore[1]?.ended === true, 'ended giveaway snapshot stays ended after a stale join write');
+  assert(Array.isArray(giveawayStore[1]?.participants) && giveawayStore[1].participants.length === 1, 'stale join does not overwrite ended giveaway participants');
 }
 
 async function checkDatabaseFacade() {

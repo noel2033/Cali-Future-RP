@@ -19,6 +19,7 @@ import {
 import botConfig from '../config/bot.js';
 
 const applicationCooldowns = new Map();
+const applicationInFlight = new Set();
 const APPLICATION_SUBMIT_COOLDOWN = (botConfig.applications?.applicationCooldown ?? 24) * 60 * 60 * 1000;
 
 class ApplicationService {
@@ -95,8 +96,11 @@ class ApplicationService {
             );
         }
 
-        applicationCooldowns.set(cooldownKey, now);
         return true;
+    }
+
+    static markApplicationCooldown(userId) {
+        applicationCooldowns.set(`submit_${userId}`, Date.now());
     }
 
     static async checkManagerPermission(client, guildId, member) {
@@ -125,7 +129,17 @@ class ApplicationService {
             this.validateApplicationSubmission(data);
 
             this.checkApplicationCooldown(data.userId);
+            if (applicationInFlight.has(data.userId)) {
+                throw createError(
+                    'Application submission already in progress',
+                    ErrorTypes.RATE_LIMIT,
+                    'Please wait for your current application submission to finish.',
+                    { userId: data.userId }
+                );
+            }
+            applicationInFlight.add(data.userId);
 
+            try {
             const settings = await getApplicationSettings(client, data.guildId);
             if (!settings.enabled) {
                 throw createError(
@@ -157,6 +171,7 @@ class ApplicationService {
             };
 
             const application = await createApplication(client, sanitizedData);
+            this.markApplicationCooldown(data.userId);
 
             logger.info('Application submitted', {
                 applicationId: application.id,
@@ -167,6 +182,9 @@ class ApplicationService {
             });
 
             return application;
+            } finally {
+                applicationInFlight.delete(data.userId);
+            }
         } catch (error) {
             logger.error('Error submitting application', {
                 error: error.message,

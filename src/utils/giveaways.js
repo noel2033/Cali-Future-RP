@@ -69,6 +69,21 @@ export async function saveGiveaway(client, guildId, giveawayData) {
         return await Mutex.runExclusive(`giveaway-guild:${guildId}`, async () => {
             const giveaways = await getGuildGiveaways(client, guildId);
             const giveawayMap = arrayToGiveawayMap(giveaways);
+            const existing = giveawayMap[giveawayData.messageId];
+            const existingEnded = Boolean(
+                existing && (existing.ended || existing.isEnded || isGiveawayEnded(existing)),
+            );
+            const incomingEnded = Boolean(giveawayData.ended || giveawayData.isEnded);
+
+            if (existingEnded && !incomingEnded) {
+                throw new TitanBotError(
+                    'Refusing to overwrite ended giveaway with an active snapshot',
+                    ErrorTypes.VALIDATION,
+                    'This giveaway has already ended.',
+                    { messageId: giveawayData.messageId, guildId },
+                );
+            }
+
             giveawayMap[giveawayData.messageId] = giveawayData;
             await client.db.set(key, giveawayMap);
             logger.debug(`Saved giveaway ${giveawayData.messageId} in guild ${guildId}`);
