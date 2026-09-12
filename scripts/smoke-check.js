@@ -3,7 +3,7 @@
  * Does not log into Discord or require a live bot token.
  */
 import 'dotenv/config';
-import { Client, Collection, EmbedBuilder, GatewayIntentBits, PermissionFlagsBits } from 'discord.js';
+import { Client, Collection, EmbedBuilder, GatewayIntentBits, PermissionFlagsBits, ChannelType } from 'discord.js';
 import { createEmbed, formatDate, formatDuration, formatProgressBar, formatUser } from '../src/utils/embeds.js';
 import { toDate, toEpochMs, toNonNegativeInt, toPgInt } from '../src/utils/database/timestamps.js';
 import {
@@ -33,6 +33,16 @@ import ApplicationService from '../src/services/applicationService.js';
 import { resolveComponentAccessMeta, isComponentAllowed } from '../src/utils/componentAccess.js';
 import { buildCommandRegistry, isCommandEnabledInConfig } from '../src/services/commandAccessService.js';
 import { getCommandJson, getCommandOptions } from '../src/utils/commandJson.js';
+import { redactDatabaseSecrets, redactDatabaseUrl } from '../src/utils/database/redactUrl.js';
+import { requireConfiguredPostgresUrl, resolveConfiguredPostgresUrl } from '../src/config/database/postgres.js';
+import { getLavalinkNodes } from '../src/config/music/lavalink.js';
+import { ModerationService } from '../src/services/moderation/moderationService.js';
+import ConfigService from '../src/services/config/configService.js';
+import { validateLogChannel } from '../src/utils/ticket/ticketLogging.js';
+import { ErrorTypes } from '../src/utils/errorHandler.js';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const failures = [];
 
@@ -662,6 +672,17 @@ async function checkRemainingStabilizers() {
     },
   };
   assert(hasDangerousPermissions(banOnlyRole) === true, 'roles with any dangerous permission are blocked from self-assign');
+  assert(hasDangerousPermissions({ id: 'role' }) === true, 'roles with unread permissions are treated as unsafe');
+  assert(
+    hasDangerousPermissions({
+      permissions: {
+        has() {
+          throw new Error('invalid bitfield');
+        },
+      },
+    }) === true,
+    'permission bitfield throws are treated as unsafe',
+  );
 
   ApplicationService.checkApplicationCooldown('smoke-user');
   let secondCooldownThrew = false;
@@ -925,6 +946,133 @@ async function checkDatabaseFacade() {
   assert(typeof interpolated === 'string', 'getMessage returns a string when replacements is null');
 }
 
+async function checkPluginsAndScripts() {
+  const yml = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'lavalink', 'application.yml'), 'utf8');
+  assert(yml.includes('youtube-plugin:1.18.2'), 'Lavalink YouTube plugin is pinned to 1.18.2');
+  assert(!yml.includes('ANDROID_TESTSUITE'), 'removed YouTube client ANDROID_TESTSUITE is not configured');
+  assert(yml.includes('ANDROID_VR') && yml.includes('WEBEMBEDDED'), 'YouTube clients include ANDROID_VR and WEBEMBEDDED');
+
+  const previousNodes = process.env.LAVALINK_NODES;
+  process.env.LAVALINK_NODES = JSON.stringify([
+    { host: 'valid.example', port: 443, password: 'secret' },
+    { host: 'bad-port.example', port: 99999, password: 'secret' },
+    { host: 'no-password.example', port: 443 },
+  ]);
+  try {
+    const nodes = getLavalinkNodes();
+    assert(
+      nodes.length === 1 && nodes[0].host === 'valid.example',
+      'invalid Lavalink node entries are dropped',
+    );
+  } finally {
+    if (previousNodes === undefined) {
+      delete process.env.LAVALINK_NODES;
+    } else {
+      process.env.LAVALINK_NODES = previousNodes;
+    }
+  }
+
+  assert(resolveConfiguredPostgresUrl({}) === '', 'resolveConfiguredPostgresUrl is empty without env');
+  assert(
+    resolveConfiguredPostgresUrl({ DATABASE_URL: 'postgresql://example/db' }) === 'postgresql://example/db',
+    'resolveConfiguredPostgresUrl falls back to DATABASE_URL',
+  );
+  let missingUrlThrew = false;
+  try {
+    requireConfiguredPostgresUrl({});
+  } catch {
+    missingUrlThrew = true;
+  }
+  assert(missingUrlThrew, 'requireConfiguredPostgresUrl fails closed without a URL');
+
+  const redacted = redactDatabaseUrl('postgresql://titanbot:super-secret@127.0.0.1:5432/titanbot');
+  assert(redacted.includes('***'), 'restore logs redact the database password');
+  assert(!redacted.includes('super-secret'), 'redacted database URL does not include the password');
+  assert(
+    !redactDatabaseSecrets('pg_restore failed: postgresql://titanbot:super-secret@127.0.0.1/titanbot').includes('super-secret'),
+    'restore command errors redact credentials in stderr',
+  );
+
+  assert(
+    ConfigService.verifyPermission(mockMember({ permissions: PermissionFlagsBits.ManageGuild })) === true,
+    'config verifyPermission allows ManageGuild without Administrator',
+  );
+  assert(
+    ConfigService.verifyPermission(mockMember({ permissions: PermissionFlagsBits.BanMembers })) === false,
+    'config verifyPermission still denies BanMembers-only members',
+  );
+
+  const missingPerms = validateLogChannel(
+    { type: ChannelType.GuildText, permissionsFor: () => null },
+    { id: 'bot' },
+  );
+  assert(missingPerms.valid === false, 'validateLogChannel fails closed when permissionsFor is null');
+  const throwingPerms = validateLogChannel(
+    {
+      type: ChannelType.GuildText,
+      permissionsFor: () => ({
+        has() {
+          throw new Error('invalid bitfield');
+        },
+      }),
+    },
+    { id: 'bot' },
+  );
+  assert(throwingPerms.valid === false, 'validateLogChannel fails closed when permissions.has throws');
+
+  let bannedByManageGuild = false;
+  try {
+    await ModerationService.banUser({
+      guild: {
+        ownerId: '999',
+        name: 'smoke',
+        client: {},
+        members: {
+          fetch: async () => null,
+          ban: async () => {
+            bannedByManageGuild = true;
+          },
+        },
+      },
+      user: { id: 'u1', tag: 'user#0001' },
+      moderator: {
+        ...mockMember({ permissions: PermissionFlagsBits.ManageGuild }),
+        user: { tag: 'mod#0001' },
+      },
+    });
+  } catch {
+    // logModerationAction may fail after the permission check and ban call
+  }
+  assert(bannedByManageGuild, 'ManageGuild-only moderators can ban users who are not in the guild');
+
+  let bannedByBanMembers = false;
+  let banMembersError;
+  try {
+    await ModerationService.banUser({
+      guild: {
+        ownerId: '999',
+        name: 'smoke',
+        client: {},
+        members: {
+          fetch: async () => null,
+          ban: async () => {
+            bannedByBanMembers = true;
+          },
+        },
+      },
+      user: { id: 'u2', tag: 'user#0002' },
+      moderator: {
+        ...mockMember({ permissions: PermissionFlagsBits.BanMembers }),
+        user: { tag: 'mod#0002' },
+      },
+    });
+  } catch (error) {
+    banMembersError = error;
+  }
+  assert(bannedByBanMembers === false, 'BanMembers-only moderators cannot ban users who are not in the guild');
+  assert(banMembersError?.type === ErrorTypes.PERMISSION, 'out-of-guild ban denial is a permission error');
+}
+
 async function checkPostgresRoundTrip() {
   if (!process.env.POSTGRES_URL && !process.env.POSTGRES_HOST) {
     console.log('SKIP  Postgres round-trip (no POSTGRES_URL/POSTGRES_HOST)');
@@ -1038,6 +1186,7 @@ await checkCommands();
 await checkHandlers();
 await checkPrefixAdapter();
 await checkRemainingStabilizers();
+await checkPluginsAndScripts();
 await checkPostgresRoundTrip();
 
 if (failures.length > 0) {

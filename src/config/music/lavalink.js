@@ -11,6 +11,25 @@ function parseBoolean(value, defaultValue = false) {
     return ['true', '1', 'yes'].includes(String(value).toLowerCase());
 }
 
+function sanitizeNodes(nodes) {
+    if (!Array.isArray(nodes)) {
+        return null;
+    }
+
+    const valid = nodes.filter((node) => {
+        if (!node || typeof node.host !== 'string' || !node.host.trim()) {
+            return false;
+        }
+        if (typeof node.password !== 'string' || node.password.length === 0) {
+            return false;
+        }
+        const port = Number(node.port);
+        return Number.isInteger(port) && port > 0 && port <= 65535;
+    });
+
+    return valid.length ? valid : null;
+}
+
 function parseNodesFromEnv() {
     const raw = process.env.LAVALINK_NODES?.trim();
     if (!raw) {
@@ -19,7 +38,7 @@ function parseNodesFromEnv() {
 
     try {
         const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : null;
+        return sanitizeNodes(parsed);
     } catch {
         return null;
     }
@@ -45,7 +64,7 @@ function loadNodesFromFile() {
 
     try {
         const parsed = JSON.parse(readFileSync(nodesFile, 'utf8'));
-        return parseNodesPayload(parsed);
+        return sanitizeNodes(parseNodesPayload(parsed));
     } catch {
         return null;
     }
@@ -63,7 +82,10 @@ export function getLavalinkNodes() {
     }
 
     const host = process.env.LAVALINK_HOST || 'localhost';
-    const port = Number(process.env.LAVALINK_PORT || 2333);
+    const parsedPort = Number(process.env.LAVALINK_PORT || 2333);
+    const port = Number.isInteger(parsedPort) && parsedPort > 0 && parsedPort <= 65535
+        ? parsedPort
+        : 2333;
     const password = process.env.LAVALINK_PASSWORD || 'youshallnotpass';
     const secure = parseBoolean(process.env.LAVALINK_SECURE, false);
 

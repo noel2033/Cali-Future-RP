@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import { logger } from '../src/utils/logger.js';
+import { redactDatabaseSecrets, redactDatabaseUrl } from '../src/utils/database/redactUrl.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
@@ -70,17 +71,17 @@ function runCommand(command, args) {
   });
 
   if (result.status !== 0) {
-    throw new Error(`${command} failed: ${result.stderr || result.stdout || 'Unknown error'}`);
+    throw new Error(`${command} failed: ${redactDatabaseSecrets(result.stderr || result.stdout || 'Unknown error')}`);
   }
 }
 
 async function run() {
   const args = parseArgs(process.argv.slice(2));
   const backupDir = path.resolve(args['backup-dir'] || process.env.BACKUP_DIR || path.join(process.cwd(), 'backups'));
-  const targetUrl = args['target-url'] || process.env.POSTGRES_RESTORE_URL || process.env.POSTGRES_URL;
+  const targetUrl = args['target-url'] || process.env.POSTGRES_RESTORE_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL;
 
   if (!targetUrl) {
-    throw new Error('Missing target database URL. Set POSTGRES_RESTORE_URL or POSTGRES_URL.');
+    throw new Error('Missing target database URL. Set POSTGRES_RESTORE_URL, POSTGRES_URL, or DATABASE_URL.');
   }
 
   if (!args.confirm) {
@@ -96,7 +97,7 @@ async function run() {
   logger.warn('Starting database restore', {
     event: 'restore.start',
     inputPath,
-    targetUrl,
+    targetUrl: redactDatabaseUrl(targetUrl),
     dropSchema
   });
 
@@ -124,7 +125,7 @@ async function run() {
   logger.info('Database restore completed', {
     event: 'restore.completed',
     inputPath,
-    targetUrl
+    targetUrl: redactDatabaseUrl(targetUrl)
   });
 }
 

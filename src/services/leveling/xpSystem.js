@@ -6,6 +6,7 @@ import { logEvent, EVENT_TYPES } from '../loggingService.js';
 import { formatLogLine } from '../../utils/logging/logEmbeds.js';
 import { Mutex } from '../../utils/mutex.js';
 import { wrapServiceBoundary } from '../../utils/errorHandler.js';
+import { botHasPermission } from '../../utils/permissionGuard.js';
 
 /**
  * Award XP to a member. Returns null when XP is skipped (disabled/invalid amount).
@@ -119,8 +120,7 @@ async function sendLevelUpAnnouncement(guild, member, levelData, config) {
       return;
     }
 
-    const permissions = levelUpChannel.permissionsFor(guild.members.me);
-    if (!permissions || !permissions.has(['SendMessages', 'EmbedLinks'])) {
+    if (!botHasPermission(levelUpChannel, ['SendMessages', 'EmbedLinks'])) {
       logger.warn(`Missing permissions to send levelup message in ${levelUpChannel.id}`);
       return;
     }

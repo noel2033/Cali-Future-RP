@@ -1,8 +1,9 @@
 // ticketLogging.js
 
-import { ChannelType } from 'discord.js';
+import { ChannelType, PermissionFlagsBits } from 'discord.js';
 import { getGuildConfig } from '../../services/config/guildConfig.js';
 import { logger } from '../logger.js';
+import { botHasPermission } from '../permissionGuard.js';
 import {
   buildStandardLogEmbed,
   formatRatingStars,
@@ -30,8 +31,7 @@ export async function logTicketEvent({ client, guildId, event }) {
       return;
     }
 
-    const permissions = channel.permissionsFor(guild.members.me);
-    if (!permissions.has(['SendMessages', 'EmbedLinks'])) {
+    if (!botHasPermission(channel, [PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
       logger.warn(`Missing permissions in ticket log channel: ${logChannelId}`);
       return;
     }
@@ -263,10 +263,25 @@ export function validateLogChannel(channel, botMember) {
     };
   }
 
-  const permissions = channel.permissionsFor(botMember);
+  const permissions = botMember ? channel.permissionsFor(botMember) : null;
   const requiredPermissions = ['SendMessages', 'EmbedLinks'];
 
-  const missing = requiredPermissions.filter((perm) => !permissions.has(perm));
+  if (!permissions) {
+    return {
+      valid: false,
+      error: 'Could not read bot permissions in that channel.',
+    };
+  }
+
+  let missing;
+  try {
+    missing = requiredPermissions.filter((perm) => !permissions.has(perm));
+  } catch {
+    return {
+      valid: false,
+      error: 'Could not read bot permissions in that channel.',
+    };
+  }
 
   if (missing.length > 0) {
     return {

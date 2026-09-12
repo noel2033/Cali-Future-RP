@@ -7,6 +7,7 @@ import { logEvent, EVENT_TYPES } from '../services/loggingService.js';
 import { getServerCounters, updateCounter } from '../services/serverstatsService.js';
 import { setBirthday as dbSetBirthday } from '../utils/database.js';
 import { logger } from '../utils/logger.js';
+import { botHasPermission } from '../utils/permissionGuard.js';
 
 export default {
   name: Events.GuildMemberAdd,
@@ -23,12 +24,11 @@ export default {
         const welcomeChannelId = welcomeConfig?.channelId;
 
         if (welcomeConfig?.enabled && welcomeChannelId) {
-            const channel = guild.channels.cache.get(welcomeChannelId);
-            const me = guild.members.me;
-            const permissions = channel?.isTextBased?.() && me ? channel.permissionsFor(me) : null;
-            // Skip only the welcome message if permissions are missing; the rest of the
-            // join pipeline (auto-role, verification, logging, counters) must still run.
-            if (permissions?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages])) {
+            try {
+                const channel = guild.channels.cache.get(welcomeChannelId);
+                // Skip only the welcome message if permissions are missing; the rest of the
+                // join pipeline (auto-role, verification, logging, counters) must still run.
+                if (channel?.isTextBased?.() && botHasPermission(channel, [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages])) {
                 const formatData = { user, guild, member };
                 const welcomeMessage = formatWelcomeMessage(
                     welcomeConfig.welcomeMessage || welcomeConfig.welcomeEmbed?.description || botConfig.welcome?.defaultWelcomeMessage || 'Welcome {user} to {server}!',
@@ -45,7 +45,7 @@ export default {
                     ? formatWelcomeMessage(welcomeConfig.welcomeEmbed.footer, formatData)
                     : `Welcome to ${guild.name}!`;
 
-                const canEmbed = permissions.has(PermissionFlagsBits.EmbedLinks);
+                const canEmbed = botHasPermission(channel, PermissionFlagsBits.EmbedLinks);
 
                 if (!canEmbed) {
                     await channel.send({
@@ -75,6 +75,9 @@ export default {
                         embeds: [embed] 
                     });
                 }
+                }
+            } catch (error) {
+                logger.warn('Failed to send welcome message:', error);
             }
         }
         

@@ -3,6 +3,7 @@
 import { ChannelType } from 'discord.js';
 import { getGuildConfig, updateGuildConfig } from './config/guildConfig.js';
 import { logger } from '../utils/logger.js';
+import { botHasPermission } from '../utils/permissionGuard.js';
 import {
   appendContentSection,
   buildLogDescription,
@@ -240,8 +241,7 @@ export async function logEvent({
       return null;
     }
 
-    const permissions = channel.permissionsFor(guild.members.me);
-    if (!permissions || !permissions.has(['SendMessages', 'EmbedLinks'])) {
+    if (!botHasPermission(channel, ['SendMessages', 'EmbedLinks'])) {
       logger.warn(`logEvent: Missing permissions in channel ${logChannelId}`);
       return null;
     }

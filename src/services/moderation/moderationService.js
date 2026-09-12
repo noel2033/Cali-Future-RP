@@ -4,6 +4,7 @@ import { PermissionFlagsBits } from 'discord.js';
 import { logger } from '../../utils/logger.js';
 import { TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
 import { logModerationAction } from '../../utils/moderation.js';
+import { hasPermission } from '../../utils/permissionGuard.js';
 
 function getTargetLabel(target) {
   return target.user?.tag ?? target.displayName ?? 'this user';
@@ -160,10 +161,9 @@ export class ModerationService {
       } else {
 
         const isOwner = guild.ownerId === moderator.id;
-        const hasHighPerms = moderator.permissions.has([
-            PermissionFlagsBits.ManageGuild,
-            PermissionFlagsBits.Administrator
-        ]);
+        const hasHighPerms =
+          hasPermission(moderator, PermissionFlagsBits.Administrator) ||
+          hasPermission(moderator, PermissionFlagsBits.ManageGuild);
 
         if (!isOwner && !hasHighPerms) {
             throw new TitanBotError(

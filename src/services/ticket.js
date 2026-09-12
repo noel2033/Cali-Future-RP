@@ -16,6 +16,7 @@ import { createEmbed, errorEmbed } from '../utils/embeds.js';
 import { logTicketEvent } from '../utils/ticket/ticketLogging.js';
 import { createError, ErrorTypes } from '../utils/errorHandler.js';
 import { ensureTypedServiceError, wrapServiceBoundary } from '../utils/serviceErrorBoundary.js';
+import { hasPermission } from '../utils/permissionGuard.js';
 import { PRIORITY_MAP } from '../utils/helpers.js';
 const TICKET_DELETE_DELAY_MS = 3000;
 const TICKET_DELETE_DELAY_SECONDS = Math.floor(TICKET_DELETE_DELAY_MS / 1000);
@@ -869,7 +870,7 @@ export async function unclaimTicket(channel, unclaimer) {
       );
     }
     
-    if (ticketData.claimedBy !== unclaimer.id && !unclaimer.permissions.has(PermissionFlagsBits.ManageChannels)) {
+    if (!unclaimer || (ticketData.claimedBy !== unclaimer.id && !hasPermission(unclaimer, PermissionFlagsBits.ManageChannels))) {
       ticketUserError(
         'Cannot unclaim ticket',
         'You can only unclaim your own tickets or need Manage Channels permission.',

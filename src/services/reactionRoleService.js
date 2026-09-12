@@ -50,14 +50,19 @@ function validateRoleId(roleId) {
 }
 
 export function hasDangerousPermissions(role) {
-    if (!role || !role.permissions) return false;
-    
-    for (const permission of DANGEROUS_PERMISSIONS) {
-        if (role.permissions.has(permission)) {
-            return true;
+    if (!role) return false;
+    if (!role.permissions) return true;
+
+    try {
+        for (const permission of DANGEROUS_PERMISSIONS) {
+            if (role.permissions.has(permission)) {
+                return true;
+            }
         }
+        return false;
+    } catch {
+        return true;
     }
-    return false;
 }
 
 async function validateRoleSafety(client, guildId, roleId) {
