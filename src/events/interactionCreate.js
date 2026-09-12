@@ -240,7 +240,8 @@ export default {
               const roleName = interaction.options.getString('application', false);
 
               const filtered = roles.filter(role =>
-                role.enabled !== false && 
+                role?.enabled !== false &&
+                typeof role?.name === 'string' &&
                 role.name.toLowerCase().startsWith(roleName?.toLowerCase() || '')
               );
               
@@ -256,7 +257,7 @@ export default {
                 guildId: interaction.guildId,
                 commandName: interaction.commandName
               });
-              await interaction.respond([]);
+              await interaction.respond([]).catch(() => {});
             }
           } else if (interaction.commandName === 'app-admin' && focusedOption.name === 'application') {
             try {
@@ -265,6 +266,7 @@ export default {
               const appName = interaction.options.getString('application', false);
 
               const filtered = roles.filter(role =>
+                typeof role?.name === 'string' &&
                 role.name.toLowerCase().startsWith(appName?.toLowerCase() || '')
               );
               
@@ -280,7 +282,7 @@ export default {
                 guildId: interaction.guildId,
                 commandName: interaction.commandName
               });
-              await interaction.respond([]);
+              await interaction.respond([]).catch(() => {});
             }
           } else if (interaction.commandName === 'reactroles' && focusedOption.name === 'panel') {
             try {
@@ -290,8 +292,8 @@ export default {
               
               let panels = await getAllReactionRoleMessages(client, guildId);
               
-              if (!panels || panels.length === 0) {
-                await interaction.respond([]);
+              if (!Array.isArray(panels) || panels.length === 0) {
+                await interaction.respond([]).catch(() => {});
                 return;
               }
 
@@ -354,7 +356,7 @@ export default {
               }
               
               if (validPanels.length === 0) {
-                await interaction.respond([]);
+                await interaction.respond([]).catch(() => {});
                 return;
               }
               
@@ -388,7 +390,7 @@ export default {
                 guildId: interaction.guildId,
                 commandName: interaction.commandName
               });
-              await interaction.respond([]);
+              await interaction.respond([]).catch(() => {});
             }
           } else {
             await interaction.respond([]).catch(() => {});

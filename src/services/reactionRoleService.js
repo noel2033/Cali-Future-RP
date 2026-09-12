@@ -313,9 +313,9 @@ export async function getAllReactionRoleMessages(client, guildId) {
                     const allKeys = await client.db.list();
                     
                     if (Array.isArray(allKeys)) {
-                        keys = allKeys.filter(key => key.startsWith(prefix));
+                        keys = allKeys.filter(key => typeof key === 'string' && key.startsWith(prefix));
                     } else if (allKeys.value && Array.isArray(allKeys.value)) {
-                        keys = allKeys.value.filter(key => key.startsWith(prefix));
+                        keys = allKeys.value.filter(key => typeof key === 'string' && key.startsWith(prefix));
                     } else {
                         return [];
                     }
@@ -333,13 +333,16 @@ export async function getAllReactionRoleMessages(client, guildId) {
             );
         }
         
-        if (!keys || keys.length === 0) {
+        if (!Array.isArray(keys) || keys.length === 0) {
             return [];
         }
 
         const messages = [];
         
         for (const key of keys) {
+            if (typeof key !== 'string') {
+                continue;
+            }
             try {
                 const data = await client.db.get(key);
                 

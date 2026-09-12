@@ -28,7 +28,7 @@ import { getPrefixRestriction } from '../src/config/commands/prefixRestrictions.
 import { isGiveawayEnded, saveGiveaway, deleteGiveaway, getGuildGiveaways, getGiveawayParticipants, pickWinners } from '../src/utils/giveaways.js';
 import { Mutex } from '../src/utils/mutex.js';
 import { getBotPanelStatus } from '../src/utils/panelStatus.js';
-import { hasDangerousPermissions } from '../src/services/reactionRoleService.js';
+import { hasDangerousPermissions, getAllReactionRoleMessages } from '../src/services/reactionRoleService.js';
 import ApplicationService from '../src/services/applicationService.js';
 import { resolveComponentAccessMeta, isComponentAllowed } from '../src/utils/componentAccess.js';
 import { buildCommandRegistry, isCommandEnabledInConfig } from '../src/services/commandAccessService.js';
@@ -688,6 +688,18 @@ async function checkRemainingStabilizers() {
     }) === true,
     'permission bitfield throws are treated as unsafe',
   );
+
+  const mixedKeyPanels = await getAllReactionRoleMessages({
+    db: {
+      async list() {
+        return ['guild:123456789012345678:reaction_roles:1', 99, null];
+      },
+      async get() {
+        return { messageId: '1', channelId: 'c' };
+      },
+    },
+  }, '123456789012345678');
+  assert(Array.isArray(mixedKeyPanels) && mixedKeyPanels.length === 1, 'getAllReactionRoleMessages skips non-string keys');
 
   ApplicationService.checkApplicationCooldown('smoke-user');
   let secondCooldownThrew = false;
