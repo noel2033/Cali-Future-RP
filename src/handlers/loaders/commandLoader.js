@@ -136,7 +136,15 @@ function collectCommandPayloads(client) {
         }
 
         registeredNames.add(commandName);
-        const commandJson = command.data.toJSON();
+
+        let commandJson;
+        try {
+            commandJson = command.data.toJSON();
+        } catch (error) {
+            logger.warn(`Skipping command with invalid payload: ${commandName}`, error);
+            continue;
+        }
+
         commands.push(commandJson);
         totalSubcommands += getSubcommandInfo(commandJson).length;
 
@@ -170,7 +178,8 @@ function validateCommands(commands) {
         checkLength(`${label} name`, node.name, DISCORD_NAME_MAX);
         checkLength(`${label} description`, node.description, DISCORD_DESCRIPTION_MAX);
 
-        for (const choice of node.choices || []) {
+        const choices = Array.isArray(node.choices) ? node.choices : [];
+        for (const choice of choices) {
             checkLength(`${label} choice name`, choice.name, DISCORD_DESCRIPTION_MAX);
             if (typeof choice.value === 'string') {
                 checkLength(`${label} choice value`, choice.value, DISCORD_CHOICE_VALUE_MAX);

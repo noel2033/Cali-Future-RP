@@ -987,7 +987,7 @@ class PostgreSQLDatabase {
                          VALUES ($1, $2, $3, $4) 
                          ON CONFLICT (guild_id, user_id) DO UPDATE SET 
                          reason = $3, expires_at = $4, status_at = CURRENT_TIMESTAMP`,
-                        [parsedKey.guildId, parsedKey.userId, value?.reason, (value?.expiresAt ?? value?.expires_at) ? new Date(value.expiresAt ?? value.expires_at) : null]
+                        [parsedKey.guildId, parsedKey.userId, value?.reason, toSqlDateOrNull(value?.expiresAt ?? value?.expires_at)]
                     );
                     return true;
                 

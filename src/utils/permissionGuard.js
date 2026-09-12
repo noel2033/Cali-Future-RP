@@ -30,6 +30,14 @@ export function getCommandDefaultPermissions(commandData) {
   }
 }
 
+function memberHasPermissionBits(member, bits) {
+  try {
+    return Boolean(member?.permissions?.has(bits));
+  } catch {
+    return false;
+  }
+}
+
 function normalizeRoleId(role) {
   if (!role) {
     return null;
@@ -82,14 +90,14 @@ export function memberHasModerationCommandAccess(member, guildConfig, requiredPe
     return true;
   }
 
-  if (member.permissions?.has(PermissionFlagsBits.Administrator)) {
+  if (memberHasPermissionBits(member, PermissionFlagsBits.Administrator)) {
     return true;
   }
 
   if (
     requiredPermissions != null &&
     requiredPermissions !== 0n &&
-    member.permissions?.has(requiredPermissions)
+    memberHasPermissionBits(member, requiredPermissions)
   ) {
     return true;
   }
@@ -124,7 +132,7 @@ export function memberMeetsCommandPermissions(member, permissionBitfield, option
     return true;
   }
 
-  if (member.permissions?.has(PermissionFlagsBits.Administrator)) {
+  if (memberHasPermissionBits(member, PermissionFlagsBits.Administrator)) {
     return true;
   }
 
@@ -133,7 +141,7 @@ export function memberMeetsCommandPermissions(member, permissionBitfield, option
     return false;
   }
 
-  return Boolean(member.permissions?.has(permissionBitfield));
+  return memberHasPermissionBits(member, permissionBitfield);
 }
 
 /**
@@ -219,7 +227,7 @@ export async function enforceDefaultCommandPermissions(interaction, command, con
 
 export function isAdmin(member) {
   if (!member) return false;
-  return Boolean(member.permissions?.has(PermissionFlagsBits.Administrator));
+  return memberHasPermissionBits(member, PermissionFlagsBits.Administrator);
 }
 
 export function isModerator(member, guildConfig = null) {
@@ -228,8 +236,8 @@ export function isModerator(member, guildConfig = null) {
     return true;
   }
   return (
-    Boolean(member.permissions?.has(PermissionFlagsBits.Administrator)) ||
-    Boolean(member.permissions?.has(PermissionFlagsBits.ManageGuild))
+    memberHasPermissionBits(member, PermissionFlagsBits.Administrator) ||
+    memberHasPermissionBits(member, PermissionFlagsBits.ManageGuild)
   );
 }
 

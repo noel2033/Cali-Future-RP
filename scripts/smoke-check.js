@@ -15,11 +15,11 @@ import {
   isModerator,
   botHasPermission,
 } from '../src/utils/permissionGuard.js';
-import { loadCommands, reloadCommand } from '../src/handlers/loaders/commandLoader.js';
+import { loadCommands, reloadCommand, registerCommands } from '../src/handlers/loaders/commandLoader.js';
 import loadEvents from '../src/handlers/loaders/events.js';
 import loadInteractions from '../src/handlers/loaders/interactions.js';
-import { initializeDatabase, getXpForLevel as dbGetXpForLevel, getLeaderboard as dbGetLeaderboard, getWelcomeConfig, getJoinToCreateConfig, formatChannelName, getApplication, getGuildBirthdays, getEndedGiveaways } from '../src/utils/database.js';
-import { getUserLevelKey, getEconomyKey, getGuildBirthdaysKey } from '../src/utils/database/keys.js';
+import { initializeDatabase, getXpForLevel as dbGetXpForLevel, getLeaderboard as dbGetLeaderboard, getWelcomeConfig, getJoinToCreateConfig, formatChannelName, getApplication, getGuildBirthdays, getEndedGiveaways, getColor as dbGetColor, getMessage } from '../src/utils/database.js';
+import { getUserLevelKey, getEconomyKey, getGuildBirthdaysKey, getAFKKey } from '../src/utils/database/keys.js';
 import { getXpForLevel, getLevelFromXp, getUserLevelData, getLeaderboard, MAX_LEVEL } from '../src/services/leveling/leveling.js';
 import { createMockInteraction, resolveSlashAccessKey, resolvePrefixAccessKey, supportsPrefixExecution } from '../src/utils/messageAdapter.js';
 
@@ -327,6 +327,21 @@ async function checkPermissions() {
   );
   assert(await checkUserPermissions(null, 0n) === false, 'checkUserPermissions denies a missing interaction');
   assert(await checkModerationPermissions(null, {}, 0n) === false, 'checkModerationPermissions denies a missing interaction');
+
+  const throwingPerms = {
+    id: '111',
+    guild: { ownerId: '999' },
+    permissions: {
+      has() {
+        throw new Error('invalid bitfield');
+      },
+    },
+  };
+  assert(
+    memberMeetsCommandPermissions(throwingPerms, PermissionFlagsBits.SendMessages) === false,
+    'memberMeetsCommandPermissions fails closed when permissions.has throws',
+  );
+  assert(isModerator(throwingPerms) === false, 'isModerator fails closed when permissions.has throws');
 }
 
 async function checkCommands() {
@@ -356,6 +371,43 @@ async function checkCommands() {
 
   const missingReload = await reloadCommand({}, 'ban');
   assert(missingReload.success === false, 'reloadCommand fails closed without a command collection');
+
+  let registeredBody;
+  const fakeClient = {
+    commands: new Collection([
+      ['okcmd', {
+        data: {
+          name: 'okcmd',
+          toJSON() {
+            return { name: 'okcmd', description: 'ok', choices: { not: 'array' } };
+          },
+        },
+      }],
+      ['badjson', {
+        data: {
+          name: 'badjson',
+          toJSON() {
+            throw new Error('toJSON failed');
+          },
+        },
+      }],
+    ]),
+    rest: {
+      async put(_url, { body }) {
+        registeredBody = body;
+        return body;
+      },
+    },
+  };
+  let registerThrew = false;
+  try {
+    await registerCommands(fakeClient, { clientId: '123' });
+  } catch {
+    registerThrew = true;
+  }
+  assert(!registerThrew, 'registerCommands does not throw on non-array choices or toJSON failures');
+  assert(Array.isArray(registeredBody) && registeredBody.some((cmd) => cmd.name === 'okcmd'), 'registerCommands still registers valid commands');
+  assert(!registeredBody.some((cmd) => cmd.name === 'badjson'), 'registerCommands skips commands whose toJSON throws');
 }
 
 async function checkHandlers() {
@@ -432,6 +484,13 @@ async function checkPrefixAdapter() {
   assert(resolveSlashAccessKey({ commandName: 'ban' }) === 'ban', 'resolveSlashAccessKey survives missing options');
   assert(resolveSlashAccessKey(null) === null, 'resolveSlashAccessKey returns null without an interaction');
   assert(resolvePrefixAccessKey(null, []) === null, 'resolvePrefixAccessKey returns null without command data');
+  let missingArgsThrew = false;
+  try {
+    resolvePrefixAccessKey(commandData, undefined);
+  } catch {
+    missingArgsThrew = true;
+  }
+  assert(!missingArgsThrew, 'resolvePrefixAccessKey survives missing args');
   assert(supportsPrefixExecution(null) === false, 'supportsPrefixExecution is false for missing commands');
 }
 
@@ -508,6 +567,17 @@ async function checkDatabaseFacade() {
     },
   });
   assert(Array.isArray(missingGiveawayList) && missingGiveawayList.length === 0, 'getEndedGiveaways survives a non-array list result');
+
+  assert(dbGetColor(null) === '#000000', 'database getColor returns fallback for non-string paths');
+  let getMessageThrew = false;
+  let interpolated;
+  try {
+    interpolated = getMessage('unused-key', null);
+  } catch {
+    getMessageThrew = true;
+  }
+  assert(!getMessageThrew, 'getMessage does not throw when replacements is null');
+  assert(typeof interpolated === 'string', 'getMessage returns a string when replacements is null');
 }
 
 async function checkPostgresRoundTrip() {
@@ -596,10 +666,17 @@ async function checkPostgresRoundTrip() {
     const birthdayAfterMixed = await db.get(birthdayKey);
     assert(birthdayAfterMixed?.['user-1']?.month === 3, 'valid birthday kept when mixed with invalid');
     assert(birthdayAfterMixed?.['user-2'] == null, 'invalid birthday entry is skipped');
+
+    const afkKey = getAFKKey(guildId, userId);
+    const afkWrite = await db.set(afkKey, { reason: 'away', expiresAt: 'not-a-date' });
+    assert(afkWrite === true, 'invalid AFK expiry is stored as null instead of throwing');
+    const afkRow = await db.get(afkKey);
+    assert(afkRow?.reason === 'away', 'AFK reason persists when expiry is invalid');
   } finally {
     await db.delete(levelKey).catch(() => {});
     await db.delete(economyKey).catch(() => {});
     await db.delete(getGuildBirthdaysKey(guildId)).catch(() => {});
+    await db.delete(getAFKKey(guildId, userId)).catch(() => {});
     if (db.db?.pool) {
       await db.db.pool.end().catch(() => {});
     }

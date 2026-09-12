@@ -125,16 +125,24 @@ export function unwrapReplitData(data) {
 export { pgDb };
 
 export const getMessage = (key, replacements = {}) => {
-    let message = BotConfig.messages[key] || key;
-    for (const [k, v] of Object.entries(replacements)) {
+    let message = BotConfig.messages?.[key] || key;
+    const vars = replacements && typeof replacements === 'object' ? replacements : {};
+    for (const [k, v] of Object.entries(vars)) {
         message = message.replace(new RegExp(`\\{${k}\\}`, "g"), v);
     }
     return message;
 };
 
 export const getColor = (path, fallback = "#000000") => {
+    if (typeof path !== "string" || !path) {
+        return fallback;
+    }
+
     const parts = path.split(".");
-    let current = BotConfig.embeds.colors;
+    let current = BotConfig.embeds?.colors;
+    if (!current || typeof current !== "object") {
+        return fallback;
+    }
 
     for (const part of parts) {
         if (current[part] === undefined) {

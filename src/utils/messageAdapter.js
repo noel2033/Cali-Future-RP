@@ -56,7 +56,7 @@ export function resolvePrefixAccessKey(commandData, args) {
     return null;
   }
 
-  const options = mapArgumentsToOptions(args, commandData);
+  const options = mapArgumentsToOptions(Array.isArray(args) ? args : [], commandData);
   const subcommand = options.getSubcommand();
   const subcommandGroup = options.getSubcommandGroup();
   const commandName = getCommandJson(commandData)?.name;
