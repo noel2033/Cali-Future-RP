@@ -8,6 +8,7 @@ import {
     isGiveawayEnded 
 } from '../utils/giveaways.js';
 import { Mutex } from '../utils/mutex.js';
+import { hasPermission } from '../utils/permissionGuard.js';
 import { 
     selectWinners,
     isUserRateLimited,
@@ -106,10 +107,12 @@ export const giveawayEndHandler = {
                 );
             }
 
-            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+            if (!hasPermission(interaction.member, PermissionFlagsBits.ManageGuild)) {
                 return replyUserError(interaction, { type: ErrorTypes.PERMISSION, message: 'You need the \'Manage Server\' permission to end a giveaway.' });
             }
 
+            const lockKey = `giveaway:${interaction.message.id}`;
+            await Mutex.runExclusive(lockKey, async () => {
             const guildGiveaways = await getGuildGiveaways(client, interaction.guildId);
             const giveaway = guildGiveaways.find(g => g.messageId === interaction.message.id);
 
@@ -196,6 +199,7 @@ export const giveawayEndHandler = {
                 ],
                 flags: MessageFlags.Ephemeral
             });
+            });
 
         } catch (error) {
             logger.error('Error in giveaway end handler:', error);
@@ -222,10 +226,12 @@ export const giveawayRerollHandler = {
                 );
             }
 
-            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+            if (!hasPermission(interaction.member, PermissionFlagsBits.ManageGuild)) {
                 return replyUserError(interaction, { type: ErrorTypes.PERMISSION, message: 'You need the \'Manage Server\' permission to reroll a giveaway.' });
             }
 
+            const lockKey = `giveaway:${interaction.message.id}`;
+            await Mutex.runExclusive(lockKey, async () => {
             const guildGiveaways = await getGuildGiveaways(client, interaction.guildId);
             const giveaway = guildGiveaways.find(g => g.messageId === interaction.message.id);
 
@@ -317,6 +323,7 @@ export const giveawayRerollHandler = {
                     )
                 ],
                 flags: MessageFlags.Ephemeral
+            });
             });
 
         } catch (error) {

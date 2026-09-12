@@ -29,6 +29,10 @@ function normalizeToggleRecord(raw) {
 export function buildCommandRegistry(client) {
   const categories = new Map();
 
+  if (!client?.commands || typeof client.commands.values !== 'function') {
+    return categories;
+  }
+
   for (const command of client.commands.values()) {
     if (!command?.data?.name) {
       continue;
@@ -55,10 +59,18 @@ export function buildCommandRegistry(client) {
       isSubcommand: false,
     });
 
-    // Add subcommands if they exist
-    const commandJson = command.data.toJSON?.() || {};
+    let commandJson = {};
+    try {
+      commandJson = command.data.toJSON?.() || {};
+    } catch {
+      commandJson = {};
+    }
 
-    for (const option of commandJson.options || []) {
+    const commandOptions = Array.isArray(commandJson.options)
+      ? commandJson.options.filter((option) => option && typeof option === 'object')
+      : [];
+
+    for (const option of commandOptions) {
       if (option.type === 1) {
         const subcommandName = `${command.data.name} ${option.name}`;
         categories.get(categoryKey).commands.push({
@@ -71,7 +83,10 @@ export function buildCommandRegistry(client) {
       }
 
       if (option.type === 2) {
-        for (const sub of option.options || []) {
+        const groupOptions = Array.isArray(option.options)
+          ? option.options.filter((sub) => sub && typeof sub === 'object')
+          : [];
+        for (const sub of groupOptions) {
           if (sub.type === 1) {
             const subcommandName = `${command.data.name} ${option.name} ${sub.name}`;
             categories.get(categoryKey).commands.push({

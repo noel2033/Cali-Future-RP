@@ -55,6 +55,10 @@ async function getAllFiles(directory, fileList = []) {
 }
 
 export async function loadCommands(client) {
+    if (!client || typeof client !== 'object') {
+        throw new Error('loadCommands requires a Discord client');
+    }
+
     client.commands = new Collection();
     const commandsPath = path.join(__dirname, '../../commands');
     const commandFiles = await getAllFiles(commandsPath);

@@ -14,6 +14,7 @@ import { InteractionHelper } from '../../../utils/interactionHelper.js';
 import { logger } from '../../../utils/logger.js';
 
 import { replyUserError, ErrorTypes } from '../../../utils/errorHandler.js';
+import { hasPermission } from '../../../utils/permissionGuard.js';
 export function getCategoryStatus(enabledEvents, category, auditEnabled) {
   if (!auditEnabled) return false;
   const events = enabledEvents || {};
@@ -179,7 +180,7 @@ export default {
   prefixOnly: false,
   async execute(interaction, config, client) {
     try {
-      if (!interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+      if (!hasPermission(interaction.member, PermissionsBitField.Flags.ManageGuild)) {
         return await replyUserError(interaction, { type: ErrorTypes.PERMISSION, message: 'You need **Manage Server** permissions to view the logging dashboard.' });
       }
 

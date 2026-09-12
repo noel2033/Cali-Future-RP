@@ -1,6 +1,7 @@
 // messageAdapter.js
 
 import { mapArgumentsToOptions } from './prefixParser.js';
+import { getCommandJson } from './commandJson.js';
 import { handleInteractionError } from './errorHandler.js';
 import { InteractionHelper } from './interactionHelper.js';
 import { SLASH_ONLY_COMMANDS } from '../config/commands/prefixRestrictions.js';
@@ -9,14 +10,6 @@ import { ResponseCoordinator, buildPrefixUsage } from './responseCoordinator.js'
 import { enforceDefaultCommandPermissions } from './permissionGuard.js';
 
 export { buildPrefixUsage };
-
-function getCommandJson(commandData) {
-  try {
-    return commandData?.toJSON ? commandData.toJSON() : commandData;
-  } catch {
-    return commandData;
-  }
-}
 
 function emptyPrefixOptions(args) {
   return {

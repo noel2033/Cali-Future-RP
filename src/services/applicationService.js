@@ -3,6 +3,7 @@
 import { logger } from '../utils/logger.js';
 import { createError, ErrorTypes } from '../utils/errorHandler.js';
 import { PermissionFlagsBits } from 'discord.js';
+import { hasPermission } from '../utils/permissionGuard.js';
 import { sanitizeInput, sanitizeMarkdown } from '../utils/validation.js';
 import {
     getApplicationSettings,
@@ -100,18 +101,18 @@ class ApplicationService {
 
     static async checkManagerPermission(client, guildId, member) {
         const settings = await getApplicationSettings(client, guildId);
-        
-        const isManager = 
-            member.permissions.has(PermissionFlagsBits.ManageGuild) ||
-            (settings.managerRoles && 
-             settings.managerRoles.some(roleId => member.roles.cache.has(roleId)));
+
+        const isManager =
+            hasPermission(member, PermissionFlagsBits.ManageGuild) ||
+            (settings.managerRoles &&
+             settings.managerRoles.some(roleId => member?.roles?.cache?.has(roleId)));
 
         if (!isManager) {
             throw createError(
                 'User lacks permission to manage applications',
                 ErrorTypes.PERMISSION,
                 'You do not have permission to manage applications.',
-                { userId: member.id, guildId }
+                { userId: member?.id, guildId }
             );
         }
 

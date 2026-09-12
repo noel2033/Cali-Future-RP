@@ -7,6 +7,7 @@ import { getGuildConfig, setGuildConfig } from './config/guildConfig.js';
 import { createError, ErrorTypes } from '../utils/errorHandler.js';
 import { insertVerificationAudit } from '../utils/database.js';
 import { ensureTypedServiceError } from '../utils/serviceErrorBoundary.js';
+import { hasPermission } from '../utils/permissionGuard.js';
 
 const verificationCooldowns = new Map();
 const attemptTracker = new Map();
@@ -466,7 +467,7 @@ export async function validateBotCanAssignRole(guild, roleId) {
         return false;
     }
 
-    if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
+    if (!hasPermission(botMember, PermissionFlagsBits.ManageRoles)) {
         logger.warn('Cannot assign role - missing ManageRoles permission', {
             guildId: guild.id,
             roleId

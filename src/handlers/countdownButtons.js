@@ -3,6 +3,7 @@ import { successEmbed } from '../utils/embeds.js';
 import { logger } from '../utils/logger.js';
 
 import { replyUserError, ErrorTypes } from '../utils/errorHandler.js';
+import { hasPermission } from '../utils/permissionGuard.js';
 function createControlButtons(countdownId, isPaused = false) {
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -113,7 +114,7 @@ async function countdownButtonHandler(interaction, client, args) {
             });
         }
 
-        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
+        if (!hasPermission(interaction.member, PermissionFlagsBits.ManageMessages)) {
             return await interaction.reply({
                 content: 'You need the "Manage Messages" permission to control countdowns.',
                 flags: ["Ephemeral"],

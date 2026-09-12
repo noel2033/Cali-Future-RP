@@ -12,6 +12,7 @@ import {
 } from '../../utils/panelStatus.js';
 import { startDashboardSession } from '../../utils/dashboardSession.js';
 import { getReactionRoleKey } from '../../utils/database/keys.js';
+import { hasPermission } from '../../utils/permissionGuard.js';
 
 const DASHBOARD_EPHEMERAL = MessageFlags.Ephemeral;
 const SELECT_OPTION_LABEL_LIMIT = 100;
@@ -164,7 +165,7 @@ async function handleSetup(interaction) {
         );
     }
 
-    if (!interaction.guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)) {
+    if (!hasPermission(interaction.guild.members?.me, PermissionFlagsBits.ManageRoles)) {
         throw createError(
             'Bot missing ManageRoles permission',
             ErrorTypes.PERMISSION,

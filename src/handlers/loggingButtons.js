@@ -21,6 +21,7 @@ import {
 import { getGuildConfig } from '../services/config/guildConfig.js';
 import { successEmbed } from '../utils/embeds.js';
 import { replyUserError, ErrorTypes, handleInteractionError } from '../utils/errorHandler.js';
+import { hasPermission } from '../utils/permissionGuard.js';
 import { logger } from '../utils/logger.js';
 import {
   buildLoggingDashboardView,
@@ -50,7 +51,7 @@ export default {
 
   async execute(interaction) {
     try {
-      if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+      if (!hasPermission(interaction.member, PermissionFlagsBits.ManageGuild)) {
         return interaction.reply({
           content: '❌ You need **Manage Server** permissions to use this.',
           ephemeral: true,
@@ -374,7 +375,7 @@ async function showChannelModal(interaction, destination) {
 }
 
 export async function handleLoggingMenuSelect(interaction) {
-  if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+  if (!hasPermission(interaction.member, PermissionFlagsBits.ManageGuild)) {
     return interaction.reply({
       content: '❌ You need **Manage Server** permissions to use this.',
       ephemeral: true,

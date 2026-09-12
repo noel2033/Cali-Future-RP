@@ -6,6 +6,7 @@ import { withErrorHandling, createError, ErrorTypes, replyUserError } from '../.
 import { removeVerification, verifyUser } from '../../services/verificationService.js';
 import { logger } from '../../utils/logger.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+import { hasPermission } from '../../utils/permissionGuard.js';
 import { getWelcomeConfig } from '../../utils/database.js';
 import verificationDashboard from './modules/verification_dashboard.js';
 
@@ -131,7 +132,7 @@ async function handleSetup(interaction, guild, client) {
         );
     }
 
-    if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
+    if (!hasPermission(botMember, PermissionFlagsBits.ManageRoles)) {
         throw createError(
             "Missing ManageRoles permission",
             ErrorTypes.PERMISSION,

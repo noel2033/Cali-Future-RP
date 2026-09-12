@@ -12,6 +12,7 @@ import {
 } from '../../services/giveawayService.js';
 import { logEvent, EVENT_TYPES } from '../../services/loggingService.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+import { hasPermission } from '../../utils/permissionGuard.js';
 
 import { botConfig } from '../../config/bot.js';
 
@@ -66,7 +67,7 @@ export default {
             );
         }
 
-        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        if (!hasPermission(interaction.member, PermissionFlagsBits.ManageGuild)) {
             throw new TitanBotError(
                 'User lacks ManageGuild permission',
                 ErrorTypes.PERMISSION,

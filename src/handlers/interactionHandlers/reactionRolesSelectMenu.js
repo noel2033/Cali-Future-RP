@@ -5,6 +5,7 @@ import { handleInteractionError, createError, ErrorTypes } from '../../utils/err
 import { getColor } from '../../config/bot.js';
 import { logEvent, EVENT_TYPES } from '../../services/loggingService.js';
 import { getReactionRoleMessage } from '../../services/reactionRoleService.js';
+import { hasPermission } from '../../utils/permissionGuard.js';
 
 export async function handleReactionRolesSelectMenu(interaction, client) {
     try {
@@ -49,7 +50,7 @@ export async function handleReactionRolesSelectMenu(interaction, client) {
             );
         }
 
-        if (!me.permissions.has('ManageRoles')) {
+        if (!hasPermission(me, 'ManageRoles')) {
             throw createError(
                 'Bot missing ManageRoles permission',
                 ErrorTypes.PERMISSION,

@@ -14,6 +14,7 @@ import {
   checkModerationPermissions,
   isModerator,
   botHasPermission,
+  hasPermission,
 } from '../src/utils/permissionGuard.js';
 import { loadCommands, reloadCommand, registerCommands } from '../src/handlers/loaders/commandLoader.js';
 import loadEvents from '../src/handlers/loaders/events.js';
@@ -22,6 +23,12 @@ import { initializeDatabase, getXpForLevel as dbGetXpForLevel, getLeaderboard as
 import { getUserLevelKey, getEconomyKey, getGuildBirthdaysKey, getAFKKey } from '../src/utils/database/keys.js';
 import { getXpForLevel, getLevelFromXp, getUserLevelData, getLeaderboard, MAX_LEVEL } from '../src/services/leveling/leveling.js';
 import { createMockInteraction, resolveSlashAccessKey, resolvePrefixAccessKey, supportsPrefixExecution, executePrefixCommand } from '../src/utils/messageAdapter.js';
+import { mapArgumentsToOptions } from '../src/utils/prefixParser.js';
+import { getPrefixRestriction } from '../src/config/commands/prefixRestrictions.js';
+import { isGiveawayEnded } from '../src/utils/giveaways.js';
+import { resolveComponentAccessMeta, isComponentAllowed } from '../src/utils/componentAccess.js';
+import { buildCommandRegistry, isCommandEnabledInConfig } from '../src/services/commandAccessService.js';
+import { getCommandJson, getCommandOptions } from '../src/utils/commandJson.js';
 
 const failures = [];
 
@@ -250,6 +257,10 @@ async function checkEmbeds() {
     nullFooterThrew = true;
   }
   assert(!nullFooterThrew, 'setFooter(null) does not throw');
+  const medalDescription = new EmbedBuilder().setDescription('🥇 <@1> - Level 10').toJSON().description;
+  assert(medalDescription?.includes('🥇'), 'leaderboard medals are not stripped from embeds');
+  const emojiTitle = new EmbedBuilder().setTitle('🎉').toJSON().title;
+  assert(emojiTitle === '🎉', 'emoji-only embed titles are kept');
 }
 
 async function checkPermissions() {
@@ -346,6 +357,7 @@ async function checkPermissions() {
     'memberMeetsCommandPermissions fails closed when permissions.has throws',
   );
   assert(isModerator(throwingPerms) === false, 'isModerator fails closed when permissions.has throws');
+  assert(hasPermission(null, PermissionFlagsBits.ManageGuild) === false, 'hasPermission denies a missing member');
 }
 
 async function checkCommands() {
@@ -361,12 +373,19 @@ async function checkCommands() {
   const DISCORD_DESCRIPTION_MAX = 100;
   const overLimit = [];
   for (const command of commands.values()) {
-    const json = command.data.toJSON();
+    let json;
+    try {
+      json = command.data.toJSON();
+    } catch {
+      overLimit.push(`${command.data?.name || 'unknown'} (toJSON failed)`);
+      continue;
+    }
     if (json.description?.length > DISCORD_DESCRIPTION_MAX) {
       overLimit.push(`${json.name} (${json.description.length})`);
     }
-    for (const option of json.options || []) {
-      if (option.description?.length > DISCORD_DESCRIPTION_MAX) {
+    const options = Array.isArray(json.options) ? json.options : [];
+    for (const option of options) {
+      if (option?.description?.length > DISCORD_DESCRIPTION_MAX) {
         overLimit.push(`${json.name}.${option.name} (${option.description.length})`);
       }
     }
@@ -534,6 +553,88 @@ async function checkPrefixAdapter() {
     missingPrefixCommandThrew = true;
   }
   assert(!missingPrefixCommandThrew, 'executePrefixCommand fails closed without a command');
+}
+
+async function checkRemainingStabilizers() {
+  const futureIso = new Date(Date.now() + 120_000).toISOString();
+  const pastIso = new Date(Date.now() - 120_000).toISOString();
+  assert(isGiveawayEnded({ endsAt: futureIso }) === false, 'isGiveawayEnded parses future ISO end times as active');
+  assert(isGiveawayEnded({ endsAt: pastIso }) === true, 'isGiveawayEnded parses past ISO end times as ended');
+  assert(isGiveawayEnded({ ended: true, endsAt: futureIso }) === true, 'isGiveawayEnded honors the ended flag');
+  assert(isGiveawayEnded({ endsAt: 'not-a-date' }) === true, 'isGiveawayEnded fails closed on invalid end times');
+
+  let prefixRestrictionThrew = false;
+  let prefixRestriction;
+  try {
+    prefixRestriction = getPrefixRestriction({
+      data: {
+        name: 'help',
+        toJSON() {
+          throw new Error('toJSON failed');
+        },
+      },
+    }, [], (name) => name);
+  } catch {
+    prefixRestrictionThrew = true;
+  }
+  assert(!prefixRestrictionThrew, 'getPrefixRestriction survives toJSON throw');
+  assert(prefixRestriction?.blocked === true, 'getPrefixRestriction still blocks slash-only commands when toJSON throws');
+
+  let mapped;
+  let mapThrew = false;
+  try {
+    mapped = mapArgumentsToOptions(['x'], { name: 'say', options: { not: 'array' } });
+  } catch {
+    mapThrew = true;
+  }
+  assert(!mapThrew, 'mapArgumentsToOptions survives non-array options');
+  assert(mapped.getString('unused') === 'x', 'mapArgumentsToOptions falls back to positional args when options is not an array');
+
+  assert(getCommandOptions({ options: { not: 'array' } }).length === 0, 'getCommandOptions treats non-array options as empty');
+  assert(getCommandJson({
+    name: 'x',
+    toJSON() {
+      throw new Error('toJSON failed');
+    },
+  })?.name === 'x', 'getCommandJson falls back to the builder when toJSON throws');
+
+  const giveawayEndMeta = resolveComponentAccessMeta('giveaway', 'giveaway_end');
+  assert(giveawayEndMeta?.commandName === 'gend', 'giveaway_end maps to gend for command access');
+  const ticketMeta = resolveComponentAccessMeta('ticket', 'create_ticket');
+  assert(ticketMeta?.commandName === 'ticket', 'ticket buttons map to ticket command access');
+  assert(
+    isCommandEnabledInConfig({ disabledCommands: { ticket: true } }, 'ticket', 'Ticket') === false,
+    'disabled parent commands stay disabled in access config',
+  );
+  assert(await isComponentAllowed({}, null, { commandName: 'ticket', category: 'Ticket' }) === true, 'component access without a guild does not throw');
+  assert(await isComponentAllowed({}, 'guild-1', {}) === true, 'unmapped components remain allowed');
+
+  const emptyRegistry = buildCommandRegistry({});
+  assert(emptyRegistry.size === 0, 'buildCommandRegistry returns an empty registry without client.commands');
+  const throwingRegistry = buildCommandRegistry({
+    commands: new Collection([
+      ['ok', { data: { name: 'ok', description: 'ok' }, category: 'Core' }],
+      ['bad', {
+        data: {
+          name: 'bad',
+          description: 'bad',
+          toJSON() {
+            throw new Error('toJSON failed');
+          },
+        },
+        category: 'Core',
+      }],
+    ]),
+  });
+  assert(throwingRegistry.get('core')?.commands.some((command) => command.name === 'bad'), 'buildCommandRegistry keeps commands whose toJSON throws');
+
+  let loadNullThrew = false;
+  try {
+    await loadCommands(null);
+  } catch {
+    loadNullThrew = true;
+  }
+  assert(loadNullThrew, 'loadCommands fails closed without a client');
 }
 
 async function checkDatabaseFacade() {
@@ -734,6 +835,7 @@ await checkDatabaseFacade();
 await checkCommands();
 await checkHandlers();
 await checkPrefixAdapter();
+await checkRemainingStabilizers();
 await checkPostgresRoundTrip();
 
 if (failures.length > 0) {

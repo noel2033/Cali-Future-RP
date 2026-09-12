@@ -204,8 +204,15 @@ export default {
       collector.on('end', async () => {
         const finalView = await buildDashboardView(client, interaction.guildId, interaction.guild, 'overview');
         const disabledComponents = finalView.components.map((row) => {
-          const newRow = row.toJSON();
-          newRow.components = newRow.components.map((component) => ({ ...component, disabled: true }));
+          let newRow;
+          try {
+            newRow = row.toJSON();
+          } catch {
+            return row;
+          }
+          newRow.components = Array.isArray(newRow.components)
+            ? newRow.components.map((component) => ({ ...component, disabled: true }))
+            : [];
           return newRow;
         });
 

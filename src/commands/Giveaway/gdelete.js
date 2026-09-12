@@ -6,6 +6,7 @@ import { getGuildGiveaways, deleteGiveaway } from '../../utils/giveaways.js';
 import { logEvent, EVENT_TYPES } from '../../services/loggingService.js';
 
 import { InteractionHelper } from '../../utils/interactionHelper.js';
+import { hasPermission } from '../../utils/permissionGuard.js';
 export default {
     data: new SlashCommandBuilder()
         .setName("gdelete")
@@ -30,7 +31,7 @@ export default {
             );
         }
 
-        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        if (!hasPermission(interaction.member, PermissionFlagsBits.ManageGuild)) {
             throw new TitanBotError(
                 'User lacks ManageGuild permission',
                 ErrorTypes.PERMISSION,

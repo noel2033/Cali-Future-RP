@@ -719,9 +719,10 @@ function isApplicationExpired(application, retentionDays, now = Date.now()) {
         return false;
     }
 
-    const createdAt = Number(application.createdAt) || now;
-    const updatedAt = Number(application.updatedAt) || createdAt;
-    const reviewedAt = application.reviewedAt ? Number(new Date(application.reviewedAt)) : null;
+    const createdAt = toEpochMs(application.createdAt, now);
+    const updatedAt = toEpochMs(application.updatedAt, createdAt);
+    const reviewedAtRaw = application.reviewedAt != null ? toEpochMs(application.reviewedAt, Number.NaN) : Number.NaN;
+    const reviewedAt = Number.isFinite(reviewedAtRaw) ? reviewedAtRaw : null;
     const status = typeof application.status === 'string' ? application.status.toLowerCase() : 'pending';
 
     const ageMsFromCreated = now - createdAt;
