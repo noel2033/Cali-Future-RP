@@ -287,7 +287,7 @@ class TitanBot extends Client {
         
         for (const counter of counters) {
           if (counter && counter.type && counter.channelId && counter.enabled !== false) {
-            const channel = guild.channels.cache.get(counter.channelId);
+            const channel = guild.channels?.cache?.get(counter.channelId);
             if (channel) {
               validCounters.push(counter);
               await updateCounter(this, guild, counter);

@@ -146,6 +146,10 @@ export async function checkModerationPermissions(
   requiredPermissions,
   errorMessage = 'You do not have permission to use this command.'
 ) {
+  if (!interaction) {
+    return false;
+  }
+
   if (memberHasModerationCommandAccess(interaction.member, guildConfig, requiredPermissions)) {
     return true;
   }

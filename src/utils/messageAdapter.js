@@ -29,6 +29,10 @@ function asSnowflake(value, mentionPattern) {
 }
 
 export function resolveSlashAccessKey(interaction) {
+  if (!interaction) {
+    return null;
+  }
+
   try {
     const subcommandGroup = interaction.options?.getSubcommandGroup?.(false) ?? null;
     const subcommand = interaction.options?.getSubcommand?.(false) ?? null;
@@ -41,7 +45,7 @@ export function resolveSlashAccessKey(interaction) {
       return `${interaction.commandName} ${subcommand}`;
     }
   } catch {
-    return interaction.commandName;
+    return interaction.commandName ?? null;
   }
 
   return interaction.commandName;

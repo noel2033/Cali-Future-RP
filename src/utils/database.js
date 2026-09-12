@@ -147,6 +147,14 @@ export const getColor = (path, fallback = "#000000") => {
     return typeof current === "string" ? current : fallback;
 };
 
+function asPlainObject(value) {
+    const unwrapped = unwrapReplitData(value);
+    if (!unwrapped || typeof unwrapped !== 'object' || Array.isArray(unwrapped)) {
+        return {};
+    }
+    return unwrapped;
+}
+
 export async function getGuildBirthdays(client, guildId) {
     const key = getGuildBirthdaysKey(guildId);
     try {
@@ -156,7 +164,7 @@ export async function getGuildBirthdays(client, guildId) {
         }
 
         const rawData = await client.db.get(key, {});
-        return unwrapReplitData(rawData) || {};
+        return asPlainObject(rawData);
     } catch (error) {
         logger.error(`Error retrieving birthdays for guild ${guildId}:`, error);
         return {};
@@ -224,12 +232,13 @@ async function getEndedGiveawaysFromKv(client) {
         return [];
     }
 
-    const keys = await wrapper.list('guild:');
+    const listed = await wrapper.list('guild:');
+    const keys = Array.isArray(listed) ? listed : [];
     const ended = [];
     const now = Date.now();
 
     for (const key of keys) {
-        if (!key.endsWith(':giveaways')) {
+        if (typeof key !== 'string' || !key.endsWith(':giveaways')) {
             continue;
         }
 
@@ -240,15 +249,15 @@ async function getEndedGiveawaysFromKv(client) {
 
         const rawGiveaways = await wrapper.get(key, {});
         const unwrapped = unwrapReplitData(rawGiveaways) || {};
-        const giveaways = Array.isArray(unwrapped) ? unwrapped : Object.values(unwrapped);
+        const giveaways = Array.isArray(unwrapped) ? unwrapped : Object.values(asPlainObject(unwrapped));
 
         for (const giveaway of giveaways) {
             if (!giveaway?.messageId || giveaway.ended || giveaway.isEnded) {
                 continue;
             }
 
-            const endTime = giveaway.endsAt || giveaway.endTime;
-            if (!endTime || now < Number(endTime)) {
+            const endMs = toEpochMs(giveaway.endsAt || giveaway.endTime, Number.NaN);
+            if (!Number.isFinite(endMs) || now < endMs) {
                 continue;
             }
 
@@ -257,7 +266,7 @@ async function getEndedGiveawaysFromKv(client) {
                 guild_id: guildId,
                 message_id: giveaway.messageId,
                 data: giveaway,
-                ends_at: new Date(Number(endTime)),
+                ends_at: new Date(endMs),
             });
         }
     }

@@ -11,14 +11,15 @@ import {
   memberMeetsCommandPermissions,
   memberHasModerationCommandAccess,
   checkUserPermissions,
+  checkModerationPermissions,
   isModerator,
   botHasPermission,
 } from '../src/utils/permissionGuard.js';
 import { loadCommands, reloadCommand } from '../src/handlers/loaders/commandLoader.js';
 import loadEvents from '../src/handlers/loaders/events.js';
 import loadInteractions from '../src/handlers/loaders/interactions.js';
-import { initializeDatabase, getXpForLevel as dbGetXpForLevel, getLeaderboard as dbGetLeaderboard, getWelcomeConfig, getJoinToCreateConfig, formatChannelName, getApplication } from '../src/utils/database.js';
-import { getUserLevelKey, getEconomyKey } from '../src/utils/database/keys.js';
+import { initializeDatabase, getXpForLevel as dbGetXpForLevel, getLeaderboard as dbGetLeaderboard, getWelcomeConfig, getJoinToCreateConfig, formatChannelName, getApplication, getGuildBirthdays, getEndedGiveaways } from '../src/utils/database.js';
+import { getUserLevelKey, getEconomyKey, getGuildBirthdaysKey } from '../src/utils/database/keys.js';
 import { getXpForLevel, getLevelFromXp, getUserLevelData, getLeaderboard, MAX_LEVEL } from '../src/services/leveling/leveling.js';
 import { createMockInteraction, resolveSlashAccessKey, resolvePrefixAccessKey, supportsPrefixExecution } from '../src/utils/messageAdapter.js';
 
@@ -325,6 +326,7 @@ async function checkPermissions() {
     'botHasPermission is false when permissionsFor returns null',
   );
   assert(await checkUserPermissions(null, 0n) === false, 'checkUserPermissions denies a missing interaction');
+  assert(await checkModerationPermissions(null, {}, 0n) === false, 'checkModerationPermissions denies a missing interaction');
 }
 
 async function checkCommands() {
@@ -428,6 +430,7 @@ async function checkPrefixAdapter() {
   }
   assert(!missingCommandThrew, 'createMockInteraction survives missing command data');
   assert(resolveSlashAccessKey({ commandName: 'ban' }) === 'ban', 'resolveSlashAccessKey survives missing options');
+  assert(resolveSlashAccessKey(null) === null, 'resolveSlashAccessKey returns null without an interaction');
   assert(resolvePrefixAccessKey(null, []) === null, 'resolvePrefixAccessKey returns null without command data');
   assert(supportsPrefixExecution(null) === false, 'supportsPrefixExecution is false for missing commands');
 }
@@ -467,6 +470,44 @@ async function checkDatabaseFacade() {
   }
   assert(!channelNameThrew, 'formatChannelName(null) does not throw');
   assert(typeof channelName === 'string' && channelName.length > 0, 'formatChannelName(null) returns a fallback name');
+
+  const corruptBirthdays = await getGuildBirthdays({ db: { async get() { return 'corrupt-row'; } } }, 'guild-1');
+  assert(
+    corruptBirthdays && typeof corruptBirthdays === 'object' && !Array.isArray(corruptBirthdays) && Object.keys(corruptBirthdays).length === 0,
+    'getGuildBirthdays treats non-object storage as empty',
+  );
+
+  const futureIso = new Date(Date.now() + 120_000).toISOString();
+  const pastIso = new Date(Date.now() - 120_000).toISOString();
+  const endedGiveaways = await getEndedGiveaways({
+    db: {
+      async list() {
+        return ['guild:g1:giveaways'];
+      },
+      async get() {
+        return [
+          { messageId: 'future', endsAt: futureIso, ended: false },
+          { messageId: 'past', endsAt: pastIso, ended: false },
+        ];
+      },
+    },
+  });
+  assert(
+    endedGiveaways.length === 1 && endedGiveaways[0].message_id === 'past',
+    'ISO giveaway end times are parsed instead of treated as already ended',
+  );
+
+  const missingGiveawayList = await getEndedGiveaways({
+    db: {
+      async list() {
+        return null;
+      },
+      async get() {
+        return {};
+      },
+    },
+  });
+  assert(Array.isArray(missingGiveawayList) && missingGiveawayList.length === 0, 'getEndedGiveaways survives a non-array list result');
 }
 
 async function checkPostgresRoundTrip() {
@@ -536,9 +577,29 @@ async function checkPostgresRoundTrip() {
     const clampedEconomy = await db.get(economyKey);
     assert(clampedEconomy?.wallet === 2147483647, 'Postgres economy wallet clamps to INTEGER max');
     assert(clampedEconomy?.bank === 2147483647, 'Postgres economy bank clamps to INTEGER max');
+
+    const birthdayKey = getGuildBirthdaysKey(guildId);
+    await db.set(birthdayKey, { 'user-1': { month: 3, day: 15 } });
+    const birthdayRow = await db.get(birthdayKey);
+    assert(birthdayRow?.['user-1']?.month === 3 && birthdayRow?.['user-1']?.day === 15, 'Postgres birthdays persist valid month/day');
+
+    const rejectedBirthday = await db.set(birthdayKey, { 'user-1': { month: 99, day: 15 } });
+    assert(rejectedBirthday === false, 'invalid birthday payload is rejected before delete');
+    const birthdayAfterReject = await db.get(birthdayKey);
+    assert(birthdayAfterReject?.['user-1']?.month === 3, 'rejected birthday write does not wipe existing rows');
+
+    const mixedBirthday = await db.set(birthdayKey, {
+      'user-1': { month: 3, day: 15 },
+      'user-2': { month: 99, day: 1 },
+    });
+    assert(mixedBirthday === true, 'mixed birthday payload writes valid entries');
+    const birthdayAfterMixed = await db.get(birthdayKey);
+    assert(birthdayAfterMixed?.['user-1']?.month === 3, 'valid birthday kept when mixed with invalid');
+    assert(birthdayAfterMixed?.['user-2'] == null, 'invalid birthday entry is skipped');
   } finally {
     await db.delete(levelKey).catch(() => {});
     await db.delete(economyKey).catch(() => {});
+    await db.delete(getGuildBirthdaysKey(guildId)).catch(() => {});
     if (db.db?.pool) {
       await db.db.pool.end().catch(() => {});
     }
