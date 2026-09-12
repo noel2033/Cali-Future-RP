@@ -108,7 +108,7 @@ class ApplicationService {
 
         const isManager =
             hasPermission(member, PermissionFlagsBits.ManageGuild) ||
-            (settings.managerRoles &&
+            (Array.isArray(settings.managerRoles) &&
              settings.managerRoles.some(roleId => member?.roles?.cache?.has(roleId)));
 
         if (!isManager) {

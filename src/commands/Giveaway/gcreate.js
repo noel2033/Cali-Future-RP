@@ -87,12 +87,12 @@ export default {
         validateWinnerCount(winnerCount);
         const prizeName = validatePrize(prize);
 
-        if (!targetChannel.isTextBased()) {
+        if (!targetChannel?.isTextBased?.()) {
             throw new TitanBotError(
-                'Target channel is not text-based',
+                'Target channel is missing or not text-based',
                 ErrorTypes.VALIDATION,
                 'The channel must be a text channel.',
-                { channelId: targetChannel.id, channelType: targetChannel.type }
+                { channelId: targetChannel?.id, channelType: targetChannel?.type }
             );
         }
 

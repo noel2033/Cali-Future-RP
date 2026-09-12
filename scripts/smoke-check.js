@@ -680,6 +680,35 @@ async function checkRemainingStabilizers() {
   }
   assert(markedCooldownThrew, 'successful application submits start the cooldown');
 
+  let managerRolesTypeError = false;
+  let managerRolesDenied = false;
+  try {
+    await ApplicationService.checkManagerPermission(
+      {
+        db: {
+          async get() {
+            return { managerRoles: 'not-an-array' };
+          },
+        },
+      },
+      'g1',
+      {
+        id: 'u1',
+        permissions: {
+          has() {
+            return false;
+          },
+        },
+        roles: { cache: { has() { return true; } } },
+      },
+    );
+  } catch (error) {
+    managerRolesTypeError = error instanceof TypeError;
+    managerRolesDenied = /permission/i.test(String(error?.userMessage || error?.message || ''));
+  }
+  assert(!managerRolesTypeError, 'checkManagerPermission does not throw TypeError on non-array managerRoles');
+  assert(managerRolesDenied, 'checkManagerPermission denies non-admins when managerRoles is not an array');
+
   const giveawayStore = {
     1: { messageId: '1', ended: true, isEnded: true, participants: ['a'], prize: 'x' },
   };

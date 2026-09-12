@@ -381,7 +381,10 @@ export async function handleLoggingMenuSelect(interaction) {
     });
   }
 
-  const value = interaction.values[0];
+  const value = interaction.values?.[0];
+  if (!value) {
+    return;
+  }
 
   if (value.startsWith('set:')) {
     const destination = value.replace('set:', '');
