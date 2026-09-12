@@ -13,6 +13,9 @@ const DISCORD_FIELD_VALUE_MAX = 1024;
 const DISCORD_FIELD_MAX = 25;
 
 function clip(text, max) {
+  if (typeof text !== 'string' || !Number.isFinite(max) || max < 0) {
+    return text;
+  }
   return text.length > max ? text.slice(0, max) : text;
 }
 
@@ -107,6 +110,7 @@ EmbedBuilder.prototype.addFields = function addSanitizedFields(...fields) {
 
 const originalSetDescription = EmbedBuilder.prototype.setDescription;
 const originalSetFooter = EmbedBuilder.prototype.setFooter;
+const originalSetTimestamp = EmbedBuilder.prototype.setTimestamp;
 
 EmbedBuilder.prototype.setDescription = function setSanitizedDescription(description = '') {
   const sanitized = nonEmptySanitizedText(description || '');
@@ -141,6 +145,30 @@ EmbedBuilder.prototype.setFooter = function setSanitizedFooter(footer) {
   }
 
   return originalSetFooter.call(this, footer);
+};
+
+EmbedBuilder.prototype.setTimestamp = function setSafeTimestamp(timestamp) {
+  if (arguments.length === 0) {
+    return originalSetTimestamp.call(this);
+  }
+
+  if (timestamp instanceof Date) {
+    if (Number.isNaN(timestamp.getTime())) {
+      return this;
+    }
+    return originalSetTimestamp.call(this, timestamp);
+  }
+
+  if (timestamp == null) {
+    return originalSetTimestamp.call(this, timestamp);
+  }
+
+  const ms = typeof timestamp === 'number' ? timestamp : Date.parse(timestamp);
+  if (!Number.isFinite(ms)) {
+    return this;
+  }
+
+  return originalSetTimestamp.call(this, ms);
 };
 
 export function createEmbed({
@@ -368,7 +396,13 @@ export function warningEmbed(title, body = '') {
 }
 
 export function formatUser(user) {
-  return `${user} (${user.tag} | ${user.id})`;
+  if (!user) {
+    return 'Unknown';
+  }
+
+  const tag = user.tag ?? user.username ?? 'Unknown';
+  const id = user.id ?? 'unknown';
+  return `${user} (${tag} | ${id})`;
 }
 
 function toUnixSeconds(date) {

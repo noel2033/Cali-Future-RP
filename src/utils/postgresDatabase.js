@@ -522,6 +522,10 @@ class PostgreSQLDatabase {
                 return false;
             }
 
+            if (!record || typeof record !== 'object') {
+                return false;
+            }
+
             const {
                 guildId,
                 userId,
@@ -716,6 +720,10 @@ class PostgreSQLDatabase {
                     return true;
                 
                 case 'guild_birthdays':
+                    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+                        return false;
+                    }
+
                     await this.pool.query(
                         `INSERT INTO ${pgConfig.tables.guilds} (id, created_at) 
                          VALUES ($1, CURRENT_TIMESTAMP) 
@@ -724,8 +732,12 @@ class PostgreSQLDatabase {
                     );
                     
                     await this.pool.query(`DELETE FROM ${pgConfig.tables.birthdays} WHERE guild_id = $1`, [parsedKey.guildId]);
-                    
+
                     for (const [userId, birthday] of Object.entries(value)) {
+                        if (!birthday || typeof birthday !== 'object') {
+                            continue;
+                        }
+
                         await this.pool.query(
                             `INSERT INTO ${pgConfig.tables.users} (id, created_at) 
                              VALUES ($1, CURRENT_TIMESTAMP) 
@@ -854,7 +866,7 @@ class PostgreSQLDatabase {
                          VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP) 
                          ON CONFLICT (guild_id, user_id) DO UPDATE SET 
                          balance = $3, bank = $4, data = $5, updated_at = CURRENT_TIMESTAMP`,
-                        [parsedKey.guildId, parsedKey.userId, value.wallet ?? value.balance ?? 0, value.bank ?? 0, value]
+                        [parsedKey.guildId, parsedKey.userId, toPgInt(value?.wallet ?? value?.balance), toPgInt(value?.bank), value ?? {}]
                     );
                     return true;
                 
@@ -878,7 +890,7 @@ class PostgreSQLDatabase {
                          VALUES ($1, $2, $3, $4) 
                          ON CONFLICT (guild_id, user_id) DO UPDATE SET 
                          reason = $3, expires_at = $4, status_at = CURRENT_TIMESTAMP`,
-                        [parsedKey.guildId, parsedKey.userId, value.reason, (value.expiresAt ?? value.expires_at) ? new Date(value.expiresAt ?? value.expires_at) : null]
+                        [parsedKey.guildId, parsedKey.userId, value?.reason, (value?.expiresAt ?? value?.expires_at) ? new Date(value.expiresAt ?? value.expires_at) : null]
                     );
                     return true;
                 

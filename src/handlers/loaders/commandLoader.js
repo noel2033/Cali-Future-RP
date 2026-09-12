@@ -14,23 +14,24 @@ const DISCORD_CHOICE_VALUE_MAX = 100;
 
 function getSubcommandInfo(commandData) {
     const subcommands = [];
-    
-    if (commandData.options) {
-        for (const option of commandData.options) {
-if (option.type === 1) {
-                subcommands.push(option.name);
-} else if (option.type === 2) {
-                if (option.options) {
-                    for (const subOption of option.options) {
-if (subOption.type === 1) {
-                            subcommands.push(`${option.name}/${subOption.name}`);
-                        }
-                    }
+    const options = commandData?.options;
+
+    if (!Array.isArray(options)) {
+        return subcommands;
+    }
+
+    for (const option of options) {
+        if (option?.type === 1 && option.name) {
+            subcommands.push(option.name);
+        } else if (option?.type === 2 && Array.isArray(option.options)) {
+            for (const subOption of option.options) {
+                if (subOption?.type === 1 && subOption.name) {
+                    subcommands.push(`${option.name}/${subOption.name}`);
                 }
             }
         }
     }
-    
+
     return subcommands;
 }
 
@@ -71,15 +72,19 @@ export async function loadCommands(client) {
             const commandModule = await import(pathToFileURL(filePath).href);
             const command = commandModule.default || commandModule;
             
-            if (!command.data || !command.execute) {
+            if (!command.data || typeof command.execute !== 'function') {
                 logger.warn(`Command at ${filePath} is missing required "data" or "execute" property.`);
+                continue;
+            }
+
+            const primaryCommandName = command.data.name;
+            if (!primaryCommandName) {
+                logger.warn(`Command at ${filePath} is missing a command name.`);
                 continue;
             }
             
             command.category = category;
             command.filePath = normalizedPath;
-            
-            const primaryCommandName = command.data.name;
 
             if (uniqueCommandNames.has(primaryCommandName)) {
                 logger.warn(`Skipping duplicate command name "${primaryCommandName}" from ${normalizedPath}`);
@@ -88,8 +93,9 @@ export async function loadCommands(client) {
 
             uniqueCommandNames.add(primaryCommandName);
             client.commands.set(primaryCommandName, command);
-            
-            const subcommands = getSubcommandInfo(command.data.toJSON());
+
+            const commandJson = typeof command.data.toJSON === 'function' ? command.data.toJSON() : command.data;
+            const subcommands = getSubcommandInfo(commandJson);
             
             logger.debug(`Loaded command: ${primaryCommandName} from ${normalizedPath} (category: ${category})`);
             
@@ -110,6 +116,10 @@ function collectCommandPayloads(client) {
     const commands = [];
     let totalSubcommands = 0;
     const registeredNames = new Set();
+
+    if (!client?.commands || typeof client.commands.values !== 'function') {
+        return { commands, totalSubcommands };
+    }
 
     for (const command of client.commands.values()) {
         if (!command.data || typeof command.data.toJSON !== 'function') {
@@ -148,6 +158,15 @@ function validateCommands(commands) {
     };
 
     const walk = (node, label) => {
+        if (!node || typeof node !== 'object') {
+            validationErrors.push(`${label} is not a valid command payload`);
+            return;
+        }
+
+        if (!node.name) {
+            validationErrors.push(`${label} is missing a name`);
+        }
+
         checkLength(`${label} name`, node.name, DISCORD_NAME_MAX);
         checkLength(`${label} description`, node.description, DISCORD_DESCRIPTION_MAX);
 
@@ -164,7 +183,7 @@ function validateCommands(commands) {
     };
 
     for (const cmd of commands) {
-        walk(cmd, `Command ${cmd.name}`);
+        walk(cmd, `Command ${cmd?.name || '(unnamed)'}`);
     }
 
     if (validationErrors.length > 0) {
@@ -233,6 +252,10 @@ export async function reloadCommand(client, commandName) {
     
     if (!command) {
         return { success: false, message: `Command "${commandName}" not found` };
+    }
+
+    if (!command.filePath) {
+        return { success: false, message: `Command "${commandName}" has no file path to reload` };
     }
     
     try {

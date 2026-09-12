@@ -4,7 +4,7 @@
  */
 import 'dotenv/config';
 import { Client, Collection, EmbedBuilder, GatewayIntentBits, PermissionFlagsBits } from 'discord.js';
-import { createEmbed, formatDate, formatDuration, formatProgressBar } from '../src/utils/embeds.js';
+import { createEmbed, formatDate, formatDuration, formatProgressBar, formatUser } from '../src/utils/embeds.js';
 import { toDate, toEpochMs, toNonNegativeInt, toPgInt } from '../src/utils/database/timestamps.js';
 import {
   getCommandDefaultPermissions,
@@ -17,7 +17,7 @@ import {
 import { loadCommands } from '../src/handlers/loaders/commandLoader.js';
 import loadEvents from '../src/handlers/loaders/events.js';
 import loadInteractions from '../src/handlers/loaders/interactions.js';
-import { initializeDatabase, getXpForLevel as dbGetXpForLevel, getLeaderboard as dbGetLeaderboard } from '../src/utils/database.js';
+import { initializeDatabase, getXpForLevel as dbGetXpForLevel, getLeaderboard as dbGetLeaderboard, getWelcomeConfig, getJoinToCreateConfig, formatChannelName } from '../src/utils/database.js';
 import { getUserLevelKey, getEconomyKey } from '../src/utils/database/keys.js';
 import { getXpForLevel, getLevelFromXp, getUserLevelData, getLeaderboard, MAX_LEVEL } from '../src/services/leveling/leveling.js';
 import { createMockInteraction, resolveSlashAccessKey, resolvePrefixAccessKey, supportsPrefixExecution } from '../src/utils/messageAdapter.js';
@@ -126,6 +126,19 @@ async function checkLevelStorage() {
   assert(mapped.totalXp === 200, 'getUserLevelData reads snake_case total_xp');
   assert(mapped.lastMessage === Date.parse(iso), 'getUserLevelData reads snake_case last_message as epoch ms');
 
+  const nonObject = await getUserLevelData(
+    {
+      db: {
+        async get() {
+          return 'corrupt-row';
+        },
+      },
+    },
+    'guild-1',
+    'user-2',
+  );
+  assert(nonObject.xp === 0 && nonObject.level === 0, 'getUserLevelData treats non-object rows as empty');
+
   const client = {
     guilds: {
       cache: {
@@ -219,6 +232,15 @@ async function checkEmbeds() {
   }
   assert(!longTitleThrew, 'oversize embed titles are clipped instead of throwing');
   assert(clippedTitle?.length === 256, 'oversize embed titles are clipped to Discord 256-char limit');
+
+  let invalidDirectTimestampThrew = false;
+  try {
+    new EmbedBuilder().setTimestamp(new Date('not-a-date'));
+  } catch {
+    invalidDirectTimestampThrew = true;
+  }
+  assert(!invalidDirectTimestampThrew, 'setTimestamp(Invalid Date) does not throw');
+  assert(formatUser(null) === 'Unknown', 'formatUser(null) does not throw');
 
   let nullFooterThrew = false;
   try {
@@ -394,6 +416,13 @@ async function checkPrefixAdapter() {
   const channel = mock.options.getChannel('channel');
   assert(channel && typeof channel.then !== 'function', 'prefix getChannel returns a channel, not a Promise');
   assert(channel.id === channelId, 'prefix getChannel resolves mentions from cache');
+  let missingCommandThrew = false;
+  try {
+    createMockInteraction(fakeMessage, null, ['x']);
+  } catch {
+    missingCommandThrew = true;
+  }
+  assert(!missingCommandThrew, 'createMockInteraction survives missing command data');
   assert(resolveSlashAccessKey({ commandName: 'ban' }) === 'ban', 'resolveSlashAccessKey survives missing options');
   assert(resolvePrefixAccessKey(null, []) === null, 'resolvePrefixAccessKey returns null without command data');
   assert(supportsPrefixExecution(null) === false, 'supportsPrefixExecution is false for missing commands');
@@ -402,6 +431,35 @@ async function checkPrefixAdapter() {
 async function checkDatabaseFacade() {
   assert(typeof initializeDatabase === 'function', 'database wrapper exports initializeDatabase');
   assert(getXpForLevel(1) === 105, 'leveling XP curve helper is importable');
+
+  const welcome = await getWelcomeConfig(null, 'guild-1');
+  assert(welcome && typeof welcome === 'object', 'getWelcomeConfig returns defaults when client is null');
+
+  const joinConfig = await getJoinToCreateConfig(
+    {
+      db: {
+        async get() {
+          return { enabled: true, triggerChannels: null, temporaryChannels: null };
+        },
+      },
+    },
+    'guild-1',
+  );
+  assert(Array.isArray(joinConfig.triggerChannels), 'join-to-create triggerChannels stays an array when storage is null');
+  assert(
+    joinConfig.temporaryChannels && typeof joinConfig.temporaryChannels === 'object' && !Array.isArray(joinConfig.temporaryChannels),
+    'join-to-create temporaryChannels stays an object when storage is null',
+  );
+
+  let channelNameThrew = false;
+  let channelName;
+  try {
+    channelName = formatChannelName(null, null);
+  } catch {
+    channelNameThrew = true;
+  }
+  assert(!channelNameThrew, 'formatChannelName(null) does not throw');
+  assert(typeof channelName === 'string' && channelName.length > 0, 'formatChannelName(null) returns a fallback name');
 }
 
 async function checkPostgresRoundTrip() {

@@ -150,7 +150,7 @@ export const getColor = (path, fallback = "#000000") => {
 export async function getGuildBirthdays(client, guildId) {
     const key = getGuildBirthdaysKey(guildId);
     try {
-        if (!client.db || typeof client.db.get !== "function") {
+        if (!client?.db || typeof client.db.get !== "function") {
             logger.error("Database client is not available for getGuildBirthdays.");
             return {};
         }
@@ -165,7 +165,7 @@ export async function getGuildBirthdays(client, guildId) {
 
 export async function setBirthday(client, guildId, userId, month, day) {
     try {
-        if (!client.db || typeof client.db.set !== "function") {
+        if (!client?.db || typeof client.db.set !== "function") {
             logger.error("Database client is not available for setBirthday.");
             return false;
         }
@@ -183,7 +183,7 @@ export async function setBirthday(client, guildId, userId, month, day) {
 
 export async function deleteBirthday(client, guildId, userId) {
     try {
-        if (!client.db || typeof client.db.set !== "function") {
+        if (!client?.db || typeof client.db.set !== "function") {
             logger.error("Database client is not available for deleteBirthday.");
             return false;
         }
@@ -383,7 +383,7 @@ function normalizeWelcomeConfig(raw = {}) {
 }
 
 export async function getWelcomeConfig(client, guildId) {
-    if (!client.db) {
+    if (!client?.db) {
         logger.warn('Database not available for getWelcomeConfig');
         return normalizeWelcomeConfig();
     }
@@ -402,7 +402,7 @@ export async function getWelcomeConfig(client, guildId) {
 export async function saveWelcomeConfig(client, guildId, config) {
     const key = getWelcomeConfigKey(guildId);
     try {
-        if (!client.db || typeof client.db.set !== 'function') {
+        if (!client?.db || typeof client.db.set !== 'function') {
             logger.error('Database client is not available for saveWelcomeConfig.');
             return false;
         }
@@ -478,7 +478,7 @@ export async function getUserLevelData(client, guildId, userId) {
     const key = getUserLevelKey(guildId, userId);
     try {
         const data = await getFromDb(key, null);
-        if (!data) {
+        if (!data || typeof data !== 'object' || Array.isArray(data)) {
             return {
                 xp: 0,
                 level: 0,
@@ -611,7 +611,7 @@ export async function getLeaderboard(client, guildId, limit = 10) {
 
 export async function getApplicationRoles(client, guildId) {
     try {
-        if (!client.db || typeof client.db.get !== "function") {
+        if (!client?.db || typeof client.db.get !== "function") {
             logger.error("Database client is not available for getApplicationRoles.");
             return [];
         }
@@ -628,7 +628,7 @@ export async function getApplicationRoles(client, guildId) {
 
 export async function saveApplicationRoles(client, guildId, roles) {
     try {
-        if (!client.db || typeof client.db.set !== "function") {
+        if (!client?.db || typeof client.db.set !== "function") {
             logger.error("Database client is not available for saveApplicationRoles.");
             return false;
         }
@@ -668,7 +668,7 @@ function buildApplicationSettingsDefaults() {
 }
 
 export async function getApplicationSettings(client, guildId) {
-    if (!client.db) {
+    if (!client?.db) {
         logger.warn('Database not available for getApplicationSettings');
         return buildApplicationSettingsDefaults();
     }
@@ -724,6 +724,11 @@ function isApplicationExpired(application, retentionDays, now = Date.now()) {
 }
 
 export async function deleteApplication(client, guildId, applicationId, userIdHint = null) {
+    if (!client?.db || typeof client.db.get !== 'function' || typeof client.db.delete !== 'function') {
+        logger.error('Database client is not available for deleteApplication.');
+        return false;
+    }
+
     const key = getApplicationKey(guildId, applicationId);
 
     try {
@@ -750,7 +755,7 @@ export async function deleteApplication(client, guildId, applicationId, userIdHi
 
 export async function cleanupExpiredApplications(client, guildId) {
     try {
-        if (!client.db || typeof client.db.list !== 'function') {
+        if (!client?.db || typeof client.db.list !== 'function') {
             return { removed: 0, scanned: 0 };
         }
 
@@ -797,6 +802,11 @@ export async function cleanupExpiredApplications(client, guildId) {
 export async function saveApplicationSettings(client, guildId, settings) {
     const key = getApplicationSettingsKey(guildId);
     try {
+        if (!client?.db || typeof client.db.set !== 'function') {
+            logger.error('Database client is not available for saveApplicationSettings.');
+            return false;
+        }
+
         const existingSettings = await getApplicationSettings(client, guildId);
         const mergedSettings = { ...existingSettings, ...settings };
         
@@ -814,7 +824,7 @@ function getApplicationRoleSettingsKey(guildId, roleId) {
 
 export async function getApplicationRoleSettings(client, guildId, roleId) {
     try {
-        if (!client.db || typeof client.db.get !== "function") {
+        if (!client?.db || typeof client.db.get !== "function") {
             return { questions: null, logChannelId: null };
         }
 
@@ -829,7 +839,7 @@ export async function getApplicationRoleSettings(client, guildId, roleId) {
 
 export async function saveApplicationRoleSettings(client, guildId, roleId, settings) {
     try {
-        if (!client.db || typeof client.db.set !== "function") {
+        if (!client?.db || typeof client.db.set !== "function") {
             logger.error("Database client is not available for saveApplicationRoleSettings.");
             return false;
         }
@@ -845,7 +855,7 @@ export async function saveApplicationRoleSettings(client, guildId, roleId, setti
 
 export async function deleteApplicationRoleSettings(client, guildId, roleId) {
     try {
-        if (!client.db || typeof client.db.delete !== "function") {
+        if (!client?.db || typeof client.db.delete !== "function") {
             logger.error("Database client is not available for deleteApplicationRoleSettings.");
             return false;
         }
@@ -860,6 +870,10 @@ export async function deleteApplicationRoleSettings(client, guildId, roleId) {
 }
 
 export async function createApplication(client, application) {
+    if (!application || typeof application !== 'object') {
+        throw new Error('Invalid application payload');
+    }
+
     const { guildId, userId } = application;
     const applicationId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const key = getApplicationKey(guildId, applicationId);
@@ -876,7 +890,7 @@ status: 'pending',
     };
     
     try {
-        if (!client.db || typeof client.db.set !== "function") {
+        if (!client?.db || typeof client.db.set !== "function") {
             logger.error("Database client is not available for createApplication.");
             throw new Error("Database not available");
         }
@@ -939,7 +953,7 @@ export async function updateApplication(client, guildId, applicationId, updates)
 export async function getUserApplications(client, guildId, userId) {
     const userKey = getUserApplicationsKey(guildId, userId);
     try {
-        if (!client.db || typeof client.db.get !== "function") {
+        if (!client?.db || typeof client.db.get !== "function") {
             logger.error("Database client is not available for getUserApplications.");
             return [];
         }
@@ -972,7 +986,7 @@ export async function getApplications(client, guildId, filters = {}) {
     } = filters;
     
     try {
-        if (!client.db || typeof client.db.list !== "function") {
+        if (!client?.db || typeof client.db.list !== "function") {
             logger.error("Database client is not available for getApplications.");
             return [];
         }
@@ -1016,54 +1030,67 @@ export async function getApplications(client, guildId, filters = {}) {
     }
 }
 
+function defaultJoinToCreateConfig() {
+    return {
+        enabled: false,
+        triggerChannels: [],
+        categoryId: null,
+        channelNameTemplate: "{username}'s Room",
+        userLimit: 0,
+        bitrate: 64000,
+        temporaryChannels: {},
+    };
+}
+
+function normalizeJoinToCreateConfig(raw) {
+    const defaults = defaultJoinToCreateConfig();
+    const base = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    const userLimit = Number(base.userLimit);
+    const bitrate = Number(base.bitrate);
+
+    return {
+        ...base,
+        enabled: Boolean(base.enabled),
+        triggerChannels: Array.isArray(base.triggerChannels) ? base.triggerChannels : defaults.triggerChannels,
+        categoryId: base.categoryId ?? defaults.categoryId,
+        channelNameTemplate: typeof base.channelNameTemplate === 'string' && base.channelNameTemplate
+            ? base.channelNameTemplate
+            : defaults.channelNameTemplate,
+        userLimit: Number.isFinite(userLimit) ? userLimit : defaults.userLimit,
+        bitrate: Number.isFinite(bitrate) ? bitrate : defaults.bitrate,
+        temporaryChannels:
+            base.temporaryChannels && typeof base.temporaryChannels === 'object' && !Array.isArray(base.temporaryChannels)
+                ? base.temporaryChannels
+                : defaults.temporaryChannels,
+    };
+}
+
 export async function getJoinToCreateConfig(client, guildId) {
-    if (!client.db) {
+    if (!client?.db) {
         logger.warn('Database not available for getJoinToCreateConfig');
-        return {
-            enabled: false,
-            triggerChannels: [],
-            categoryId: null,
-            channelNameTemplate: "{username}'s Room",
-            userLimit: 0,
-            bitrate: 64000,
-            temporaryChannels: {}
-        };
+        return defaultJoinToCreateConfig();
     }
     
     const key = getJoinToCreateConfigKey(guildId);
     try {
         const config = await client.db.get(key, {});
-        const unwrapped = unwrapReplitData(config);
-        
-        return {
-            enabled: unwrapped.enabled || false,
-            triggerChannels: unwrapped.triggerChannels || [],
-            categoryId: unwrapped.categoryId || null,
-            channelNameTemplate: unwrapped.channelNameTemplate || "{username}'s Room",
-            userLimit: unwrapped.userLimit || 0,
-            bitrate: unwrapped.bitrate || 64000,
-            temporaryChannels: unwrapped.temporaryChannels || {},
-            ...unwrapped
-        };
+        return normalizeJoinToCreateConfig(unwrapReplitData(config));
     } catch (error) {
         logger.error(`Error getting Join to Create config for guild ${guildId}:`, error);
-        return {
-            enabled: false,
-            triggerChannels: [],
-            categoryId: null,
-            channelNameTemplate: "{username}'s Room",
-            userLimit: 0,
-            bitrate: 64000,
-            temporaryChannels: {}
-        };
+        return defaultJoinToCreateConfig();
     }
 }
 
 export async function saveJoinToCreateConfig(client, guildId, config) {
     const key = getJoinToCreateConfigKey(guildId);
     try {
+        if (!client?.db || typeof client.db.set !== 'function') {
+            logger.error('Database client is not available for saveJoinToCreateConfig.');
+            return false;
+        }
+
         const existingConfig = await getJoinToCreateConfig(client, guildId);
-        const mergedConfig = { ...existingConfig, ...config };
+        const mergedConfig = normalizeJoinToCreateConfig({ ...existingConfig, ...config });
         
         await client.db.set(key, mergedConfig);
         return true;
@@ -1181,15 +1208,16 @@ export async function getTemporaryChannelInfo(client, guildId, channelId) {
     }
 }
 
-export function formatChannelName(template, variables) {
-    let formatted = template;
+export function formatChannelName(template, variables = {}) {
+    let formatted = typeof template === 'string' ? template : "{username}'s Room";
+    const vars = variables && typeof variables === 'object' ? variables : {};
     
     const replacements = {
-        '{username}': variables.username || 'User',
-        '{user_tag}': variables.userTag || 'User#0000',
-        '{display_name}': variables.displayName || 'User',
-        '{guild_name}': variables.guildName || 'Server',
-        '{channel_name}': variables.channelName || 'Voice Channel'
+        '{username}': vars.username || 'User',
+        '{user_tag}': vars.userTag || 'User#0000',
+        '{display_name}': vars.displayName || 'User',
+        '{guild_name}': vars.guildName || 'Server',
+        '{channel_name}': vars.channelName || 'Voice Channel'
     };
     
     for (const [placeholder, value] of Object.entries(replacements)) {

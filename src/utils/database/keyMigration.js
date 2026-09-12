@@ -64,8 +64,8 @@ async function ensureParentRows(client, guildId, userId) {
 async function migrateEconomyFromTemp(client, legacyKey, value) {
     const parsed = parseKey(canonicalizeKey(legacyKey));
     const payload = typeof value === 'string' ? JSON.parse(value) : value;
-    const wallet = payload?.wallet ?? payload?.balance ?? 0;
-    const bank = payload?.bank ?? 0;
+    const wallet = toPgInt(payload?.wallet ?? payload?.balance);
+    const bank = toPgInt(payload?.bank);
 
     await ensureParentRows(client, parsed.guildId, parsed.userId);
     await client.query(

@@ -104,10 +104,21 @@ export async function getLeaderboard(client, guildId, limit = 10) {
       return [];
     }
     
-    const members = await guild.members.fetch().catch(error => {
+    let members = new Map();
+    try {
+      if (typeof guild.members?.fetch === 'function') {
+        members = await guild.members.fetch();
+      } else if (guild.members?.cache && typeof guild.members.cache[Symbol.iterator] === 'function') {
+        members = guild.members.cache;
+      }
+    } catch (error) {
       logger.error(`Failed to fetch members for guild ${guildId}:`, error);
-      return new Map();
-    });
+      members = new Map();
+    }
+
+    if (!members || typeof members[Symbol.iterator] !== 'function') {
+      return [];
+    }
 
     const leaderboard = [];
     
@@ -209,7 +220,7 @@ export async function getUserLevelData(client, guildId, userId) {
     const key = getUserLevelKey(guildId, userId);
     const data = await client.db.get(key);
     
-    if (!data) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
       return {
         xp: 0,
         level: 0,
@@ -292,6 +303,13 @@ export async function saveLevelingConfig(client, guildId, config) {
     }
 
     const guildConfig = await getGuildConfig(client, guildId);
+    if (!guildConfig || typeof guildConfig !== 'object') {
+      throw new TitanBotError(
+        'Guild configuration is not available',
+        ErrorTypes.DATABASE,
+        'Could not save configuration at this time.'
+      );
+    }
 
     if (config.xpCooldown != null) {
       const cooldown = Number(config.xpCooldown);

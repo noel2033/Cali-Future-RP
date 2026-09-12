@@ -17,7 +17,7 @@ export default async function loadEvents(client) {
         try {
             const { default: event } = await import(pathToFileURL(filePath).href);
 
-            if (!event?.name || typeof event.execute !== 'function') {
+            if (!event?.name || typeof event.name !== 'string' || typeof event.execute !== 'function') {
                 logger.warn(`Event ${file} is missing required "name" or "execute" properties.`);
                 continue;
             }

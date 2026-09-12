@@ -44,20 +44,25 @@ class TitanBot extends Client {
     this.modals = new Collection();
     this.cooldowns = new Collection();
     this.db = null;
-    this.rest = new REST({ version: '10' }).setToken(config.bot.token);
+    this.rest = new REST({ version: '10' });
   }
 
   async start() {
     try {
       startupLog('Starting TitanBot...');
-      if (!this.config.bot.token) {
+      if (!this.config.bot?.token) {
         throw new Error('Missing Discord bot token');
       }
+      this.rest.setToken(this.config.bot.token);
       await new Promise(resolve => setTimeout(resolve, 1000));
       
       startupLog('Initializing database...');
       const dbInstance = await initializeDatabase();
-      this.db = dbInstance.db;
+      this.db = dbInstance?.db ?? null;
+
+      if (!this.db || typeof this.db.getStatus !== 'function') {
+        throw new Error('Database failed to initialize');
+      }
 
       // Check database status and report
       const dbStatus = this.db.getStatus();
@@ -268,6 +273,10 @@ class TitanBot extends Client {
     for (const [guildId, guild] of this.guilds.cache) {
       try {
         const counters = await getServerCounters(this, guildId);
+        if (!Array.isArray(counters)) {
+          continue;
+        }
+
         const validCounters = [];
         const orphanedCounters = [];
         

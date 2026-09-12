@@ -14,7 +14,8 @@
     "backup:db": "node scripts/backup.js",
     "restore:db": "node scripts/restore.js",
     "backup:drill": "node scripts/restore-drill.js",
-    "smoke": "node scripts/smoke-check.js"
+    "smoke": "node scripts/smoke-check.js",
+    "test": "node scripts/smoke-check.js"
   },
   "dependencies": {
     "@discordjs/rest": "^2.6.1",

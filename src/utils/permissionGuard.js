@@ -227,16 +227,24 @@ export function isModerator(member, guildConfig = null) {
 
 export function hasPermission(member, permissions) {
   if (!member?.permissions) return false;
-  return member.permissions.has(permissions);
+  try {
+    return member.permissions.has(permissions);
+  } catch {
+    return false;
+  }
 }
 
 export function botHasPermission(channel, permissions) {
   if (!channel || !channel.guild) return false;
-  const botMember = channel.guild.members.me;
+  const botMember = channel.guild.members?.me;
   if (!botMember) return false;
-  const channelPermissions = channel.permissionsFor(botMember);
+  const channelPermissions = channel.permissionsFor?.(botMember);
   if (!channelPermissions) return false;
-  return channelPermissions.has(permissions);
+  try {
+    return channelPermissions.has(permissions);
+  } catch {
+    return false;
+  }
 }
 
 export async function checkUserPermissions(
@@ -256,10 +264,19 @@ export async function checkUserPermissions(
   }
 
   const isOwner = member.guild?.ownerId === member.id;
-  const isAdministrator = Boolean(member.permissions?.has(PermissionFlagsBits.Administrator));
+  let isAdministrator = false;
+  let hasRequired = false;
+  try {
+    isAdministrator = Boolean(member.permissions?.has(PermissionFlagsBits.Administrator));
+    hasRequired = Boolean(member.permissions?.has(requiredPermissions));
+  } catch {
+    isAdministrator = false;
+    hasRequired = false;
+  }
+
   const allowed = requiredPermissions === 0n
     ? isOwner || isAdministrator
-    : Boolean(member.permissions?.has(requiredPermissions));
+    : hasRequired;
 
   if (!allowed) {
     await replyUserError(interaction, {
@@ -317,7 +334,11 @@ export async function checkBotPermissions(
 
   const permArray = Array.isArray(requiredPermissions) ? requiredPermissions : [requiredPermissions];
   for (const perm of permArray) {
-    if (!permissions.has(perm)) {
+    try {
+      if (!permissions.has(perm)) {
+        missingPerms.push(perm);
+      }
+    } catch {
       missingPerms.push(perm);
     }
   }

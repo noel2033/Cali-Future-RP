@@ -74,7 +74,7 @@ export function resolvePrefixAccessKey(commandData, args) {
 
 export function createMockInteraction(message, commandData, args) {
   const argv = Array.isArray(args) ? args : [];
-  const options = mapArgumentsToOptions(argv, commandData);
+  const options = mapArgumentsToOptions(argv, commandData || {});
   const commandStartTime = Date.now();
 
   const mockInteraction = {
@@ -99,7 +99,7 @@ export function createMockInteraction(message, commandData, args) {
         const id = asSnowflake(options.getUser(name), /<@!?(\d+)>/);
         if (!id || !message.guild) return null;
 
-        const cachedMember = message.guild.members.cache.get(id);
+        const cachedMember = message.guild.members?.cache?.get(id);
         if (cachedMember) {
           return cachedMember.user;
         }
@@ -115,19 +115,19 @@ export function createMockInteraction(message, commandData, args) {
         const id = asSnowflake(options.getUser(name), /<@!?(\d+)>/);
         if (!id || !message.guild) return null;
 
-        return message.guild.members.cache.get(id) ?? null;
+        return message.guild.members?.cache?.get(id) ?? null;
       },
       getChannel: (name) => {
         const id = asSnowflake(options.getString(name) ?? options.getChannel?.(name), /<#(\d+)>/);
         if (!id || !message.guild) return null;
 
-        return message.guild.channels.cache.get(id) ?? null;
+        return message.guild.channels?.cache?.get(id) ?? null;
       },
       getRole: (name) => {
         const id = asSnowflake(options.getString(name) ?? options.getRole?.(name), /<@&(\d+)>/);
         if (!id || !message.guild) return null;
 
-        return message.guild.roles.cache.get(id) ?? null;
+        return message.guild.roles?.cache?.get(id) ?? null;
       },
       getInteger: (name) => {
         const value = options.getInteger(name);
