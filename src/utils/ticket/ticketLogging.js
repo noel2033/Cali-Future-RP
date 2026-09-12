@@ -18,6 +18,11 @@ export async function logTicketEvent({ client, guildId, event }) {
       return;
     }
 
+    if (!event || typeof event !== 'object' || typeof event.type !== 'string') {
+      logger.warn(`logTicketEvent invoked without a valid event type: ${guildId}`);
+      return;
+    }
+
     const config = await getGuildConfig(client, guildId);
 
     const logChannelId = getLogChannelForEventType(config, event.type);
@@ -40,7 +45,7 @@ export async function logTicketEvent({ client, guildId, event }) {
 
     const messageOptions = { embeds: [embed] };
 
-    if (event.attachments && event.attachments.length > 0) {
+    if (Array.isArray(event?.attachments) && event.attachments.length > 0) {
       messageOptions.files = event.attachments;
     }
 
@@ -79,7 +84,7 @@ export async function logTicketFeedback({
 function getLogChannelForEventType(config, eventType) {
   switch (eventType) {
     case 'transcript':
-      return config.ticketTranscriptChannelId || null;
+      return config?.ticketTranscriptChannelId || null;
 
     case 'open':
     case 'close':
@@ -90,7 +95,7 @@ function getLogChannelForEventType(config, eventType) {
     case 'pin':
     case 'unpin':
     case 'feedback':
-      return config.ticketLogsChannelId || null;
+      return config?.ticketLogsChannelId || null;
 
     default:
       return null;
@@ -249,9 +254,9 @@ async function createTicketLogEmbed(guild, event) {
 export async function getTicketLoggingConfig(client, guildId) {
   const config = await getGuildConfig(client, guildId);
   return {
-    enabled: !!(config.ticketLogsChannelId || config.ticketTranscriptChannelId),
-    lifecycleChannelId: config.ticketLogsChannelId || null,
-    transcriptChannelId: config.ticketTranscriptChannelId || null,
+    enabled: !!(config?.ticketLogsChannelId || config?.ticketTranscriptChannelId),
+    lifecycleChannelId: config?.ticketLogsChannelId || null,
+    transcriptChannelId: config?.ticketTranscriptChannelId || null,
   };
 }
 

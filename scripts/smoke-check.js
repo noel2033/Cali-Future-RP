@@ -37,6 +37,7 @@ import { redactDatabaseSecrets, redactDatabaseUrl } from '../src/utils/database/
 import { requireConfiguredPostgresUrl, resolveConfiguredPostgresUrl } from '../src/config/database/postgres.js';
 import { getLavalinkNodes } from '../src/config/music/lavalink.js';
 import { ModerationService } from '../src/services/moderation/moderationService.js';
+import { addXp } from '../src/services/leveling/xpSystem.js';
 import ConfigService from '../src/services/config/configService.js';
 import { validateLogChannel } from '../src/utils/ticket/ticketLogging.js';
 import { logEvent, EVENT_TYPES as LOG_EVENT_TYPES } from '../src/services/loggingService.js';
@@ -1030,6 +1031,43 @@ async function checkPluginsAndScripts() {
   }
   assert(!logMissingGuildsThrew, 'logEvent does not throw when client.guilds is missing');
   assert(logMissingGuildsResult == null, 'logEvent returns null when client.guilds is missing');
+
+  let logBadAttachmentsThrew = false;
+  try {
+    await logEvent({
+      client: {},
+      guildId: 'g1',
+      eventType: LOG_EVENT_TYPES.MEMBER_JOIN,
+      data: { title: 'join', lines: ['ok'] },
+      attachments: { length: 1 },
+    });
+  } catch {
+    logBadAttachmentsThrew = true;
+  }
+  assert(!logBadAttachmentsThrew, 'logEvent does not throw when attachments is not an array');
+
+  let logBadMetaThrew = false;
+  try {
+    await logEvent({
+      client: {},
+      guildId: 'g1',
+      eventType: LOG_EVENT_TYPES.MEMBER_JOIN,
+      data: { title: 'join', lines: ['ok'], meta: { length: 1 } },
+    });
+  } catch {
+    logBadMetaThrew = true;
+  }
+  assert(!logBadMetaThrew, 'logEvent does not throw when meta is not an array');
+
+  const skippedXp = await addXp({}, { id: 'g' }, { user: null }, 10);
+  assert(skippedXp == null, 'addXp skips members without a user payload');
+  const skippedAmount = await addXp(
+    { db: { async get() { return { enabled: true }; }, async set() { return true; } } },
+    { id: 'g', name: 'smoke' },
+    { user: { id: 'u', tag: 'u#1' }, roles: { cache: { has() { return false; } } } },
+    'not-a-number',
+  );
+  assert(skippedAmount == null, 'addXp skips non-numeric XP amounts');
 
   assert(
     ConfigService.verifyPermission(mockMember({ permissions: PermissionFlagsBits.ManageGuild })) === true,

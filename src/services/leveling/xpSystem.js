@@ -7,15 +7,21 @@ import { formatLogLine } from '../../utils/logging/logEmbeds.js';
 import { Mutex } from '../../utils/mutex.js';
 import { wrapServiceBoundary } from '../../utils/errorHandler.js';
 import { botHasPermission } from '../../utils/permissionGuard.js';
+import { toNonNegativeInt } from '../../utils/database/timestamps.js';
 
 /**
  * Award XP to a member. Returns null when XP is skipped (disabled/invalid amount).
  * Throws on storage or unexpected failures.
  */
 export const addXp = wrapServiceBoundary(async function addXp(client, guild, member, xpToAdd) {
+  if (!guild?.id || !member?.user?.id) {
+    return null;
+  }
+
   const lockKey = `leveling:${guild.id}:${member.user.id}`;
   return await Mutex.runExclusive(lockKey, async () => {
-    if (!xpToAdd || xpToAdd <= 0) {
+    const amount = toNonNegativeInt(xpToAdd);
+    if (!amount) {
       return null;
     }
 
@@ -27,8 +33,8 @@ export const addXp = wrapServiceBoundary(async function addXp(client, guild, mem
 
     const levelData = await getUserLevelData(client, guild.id, member.user.id);
 
-    levelData.xp += xpToAdd;
-    levelData.totalXp += xpToAdd;
+    levelData.xp += amount;
+    levelData.totalXp += amount;
     levelData.lastMessage = Date.now();
 
     let xpNeededForNextLevel = getXpForLevel(levelData.level);
