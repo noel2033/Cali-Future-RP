@@ -458,6 +458,9 @@ async function checkHandlers() {
     assert(client.buttons.size > 0, `loaded ${client.buttons.size} button handlers`);
     assert(client.selectMenus.size > 0, `loaded ${client.selectMenus.size} select menu handlers`);
     assert(client.modals.size > 0, `loaded ${client.modals.size} modal handlers`);
+    assert(client.buttons.get('create_ticket')?.commandName === 'ticket', 'loaded ticket buttons carry parent command access metadata');
+    assert(client.buttons.get('giveaway_end')?.commandName === 'gend', 'loaded giveaway_end buttons carry gend access metadata');
+    assert(client.selectMenus.get('reaction_roles')?.commandName === 'reactroles', 'loaded reaction role menus carry reactroles access metadata');
   } finally {
     await client.destroy();
   }
