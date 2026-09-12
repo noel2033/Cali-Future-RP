@@ -29,15 +29,19 @@ function asSnowflake(value, mentionPattern) {
 }
 
 export function resolveSlashAccessKey(interaction) {
-  const subcommandGroup = interaction.options.getSubcommandGroup(false);
-  const subcommand = interaction.options.getSubcommand(false);
+  try {
+    const subcommandGroup = interaction.options?.getSubcommandGroup?.(false) ?? null;
+    const subcommand = interaction.options?.getSubcommand?.(false) ?? null;
 
-  if (subcommandGroup && subcommand) {
-    return `${interaction.commandName} ${subcommandGroup} ${subcommand}`;
-  }
+    if (subcommandGroup && subcommand) {
+      return `${interaction.commandName} ${subcommandGroup} ${subcommand}`;
+    }
 
-  if (subcommand) {
-    return `${interaction.commandName} ${subcommand}`;
+    if (subcommand) {
+      return `${interaction.commandName} ${subcommand}`;
+    }
+  } catch {
+    return interaction.commandName;
   }
 
   return interaction.commandName;
@@ -65,7 +69,8 @@ export function resolvePrefixAccessKey(commandData, args) {
 }
 
 export function createMockInteraction(message, commandData, args) {
-  const options = mapArgumentsToOptions(args, commandData);
+  const argv = Array.isArray(args) ? args : [];
+  const options = mapArgumentsToOptions(argv, commandData);
   const commandStartTime = Date.now();
 
   const mockInteraction = {
@@ -120,12 +125,15 @@ export function createMockInteraction(message, commandData, args) {
 
         return message.guild.roles.cache.get(id) ?? null;
       },
-      getInteger: (name) => options.getInteger(name),
+      getInteger: (name) => {
+        const value = options.getInteger(name);
+        return Number.isFinite(value) ? value : null;
+      },
       getBoolean: (name) => options.getBoolean(name),
       getSubcommand: () => options.getSubcommand(),
       getSubcommandGroup: () => options.getSubcommandGroup(),
       validateRequired: () => options.validateRequired(),
-      _hoistedOptions: args.map((arg, index) => ({
+      _hoistedOptions: argv.map((arg, index) => ({
         name: commandData?.options?.[index]?.name || `arg${index}`,
         value: arg,
         type: 3,

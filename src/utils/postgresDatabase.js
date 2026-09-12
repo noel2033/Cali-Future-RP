@@ -645,7 +645,7 @@ class PostgreSQLDatabase {
                     const levelRow = userLevelResult.rows[0];
                     return {
                         xp: toPgInt(levelRow.xp),
-                        level: toPgInt(levelRow.level),
+                        level: Math.min(toPgInt(levelRow.level), 1000),
                         totalXp: toPgInt(levelRow.total_xp),
                         lastMessage: toEpochMs(levelRow.last_message, 0),
                         rank: toPgInt(levelRow.rank),
@@ -826,7 +826,7 @@ class PostgreSQLDatabase {
                             parsedKey.guildId,
                             parsedKey.userId,
                             toPgInt(value?.xp),
-                            toPgInt(value?.level),
+                            Math.min(toPgInt(value?.level), 1000),
                             toPgInt(value?.totalXp ?? value?.total_xp),
                             normalizedLastMessage,
                             toPgInt(value?.rank),

@@ -540,7 +540,8 @@ export async function saveUserLevelData(client, guildId, userId, data) {
 }
 
 export function getXpForLevel(level) {
-    return 5 * Math.pow(level, 2) + 50 * level + 50;
+    const n = Math.min(toNonNegativeInt(level), 1000);
+    return 5 * Math.pow(n, 2) + 50 * n + 50;
 }
 
 export async function getLeaderboard(client, guildId, limit = 10) {

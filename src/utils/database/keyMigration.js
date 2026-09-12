@@ -101,7 +101,7 @@ async function migrateUserLevelFromTemp(client, legacyKey, value) {
             parsed.guildId,
             parsed.userId,
             toPgInt(payload?.xp),
-            toPgInt(payload?.level),
+            Math.min(toPgInt(payload?.level), 1000),
             toPgInt(payload?.totalXp ?? payload?.total_xp),
             toDate(lastMessageValue),
             toPgInt(payload?.rank),

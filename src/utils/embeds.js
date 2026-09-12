@@ -4,6 +4,17 @@ import { EmbedBuilder } from 'discord.js';
 import { getColor, botConfig } from '../config/bot.js';
 
 const EMOJI_REGEX = /[\p{Extended_Pictographic}\uFE0F]/gu;
+const DISCORD_TITLE_MAX = 256;
+const DISCORD_DESCRIPTION_MAX = 4096;
+const DISCORD_FOOTER_MAX = 2048;
+const DISCORD_AUTHOR_NAME_MAX = 256;
+const DISCORD_FIELD_NAME_MAX = 256;
+const DISCORD_FIELD_VALUE_MAX = 1024;
+const DISCORD_FIELD_MAX = 25;
+
+function clip(text, max) {
+  return text.length > max ? text.slice(0, max) : text;
+}
 
 function sanitizeEmbedText(text = '') {
   if (typeof text !== 'string') {
@@ -37,8 +48,8 @@ function sanitizeEmbedField(field) {
 
   return {
     ...field,
-    name,
-    value,
+    name: clip(name, DISCORD_FIELD_NAME_MAX),
+    value: clip(value, DISCORD_FIELD_VALUE_MAX),
   };
 }
 
@@ -51,7 +62,7 @@ EmbedBuilder.prototype.setTitle = function setSanitizedTitle(title) {
   if (!sanitized) {
     return this;
   }
-  return originalSetTitle.call(this, sanitized);
+  return originalSetTitle.call(this, clip(sanitized, DISCORD_TITLE_MAX));
 };
 
 EmbedBuilder.prototype.setAuthor = function setSanitizedAuthor(author) {
@@ -60,7 +71,7 @@ EmbedBuilder.prototype.setAuthor = function setSanitizedAuthor(author) {
     if (!name) {
       return this;
     }
-    return originalSetAuthor.call(this, { name });
+    return originalSetAuthor.call(this, { name: clip(name, DISCORD_AUTHOR_NAME_MAX) });
   }
 
   if (author && typeof author.name === 'string') {
@@ -70,7 +81,7 @@ EmbedBuilder.prototype.setAuthor = function setSanitizedAuthor(author) {
     }
     return originalSetAuthor.call(this, {
       ...author,
-      name,
+      name: clip(name, DISCORD_AUTHOR_NAME_MAX),
     });
   }
 
@@ -79,11 +90,15 @@ EmbedBuilder.prototype.setAuthor = function setSanitizedAuthor(author) {
 
 EmbedBuilder.prototype.addFields = function addSanitizedFields(...fields) {
   const normalized = fields.flatMap((field) => (Array.isArray(field) ? field : [field]));
-  const sanitized = normalized.map(sanitizeEmbedField).filter(Boolean);
+  const sanitized = normalized.map(sanitizeEmbedField).filter(Boolean).slice(0, DISCORD_FIELD_MAX);
   if (sanitized.length === 0) {
     return this;
   }
-  return originalAddFields.call(this, sanitized);
+  try {
+    return originalAddFields.call(this, sanitized);
+  } catch {
+    return this;
+  }
 };
 
 const originalSetDescription = EmbedBuilder.prototype.setDescription;
@@ -94,7 +109,7 @@ EmbedBuilder.prototype.setDescription = function setSanitizedDescription(descrip
   if (!sanitized) {
     return this;
   }
-  return originalSetDescription.call(this, sanitized);
+  return originalSetDescription.call(this, clip(sanitized, DISCORD_DESCRIPTION_MAX));
 };
 
 EmbedBuilder.prototype.setFooter = function setSanitizedFooter(footer) {
@@ -103,7 +118,7 @@ EmbedBuilder.prototype.setFooter = function setSanitizedFooter(footer) {
     if (!text) {
       return this;
     }
-    return originalSetFooter.call(this, { text });
+    return originalSetFooter.call(this, { text: clip(text, DISCORD_FOOTER_MAX) });
   }
 
   if (footer && typeof footer.text === 'string') {
@@ -113,7 +128,7 @@ EmbedBuilder.prototype.setFooter = function setSanitizedFooter(footer) {
     }
     return originalSetFooter.call(this, {
       ...footer,
-      text,
+      text: clip(text, DISCORD_FOOTER_MAX),
     });
   }
 
@@ -396,18 +411,23 @@ export function formatQuote(content) {
 }
 
 export function formatList(items, ordered = false) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return '';
+  }
+
   return items
     .map((item, index) => (ordered ? `${index + 1}.` : '•') + `${item}`)
     .join('\n');
 }
 
 export function formatDuration(ms) {
-  if (ms < 0) return '0s';
+  const duration = Number(ms);
+  if (!Number.isFinite(duration) || duration < 0) return '0s';
 
-  const seconds = Math.floor(ms / 1000) % 60;
-  const minutes = Math.floor(ms / (1000 * 60)) % 60;
-  const hours = Math.floor(ms / (1000 * 60 * 60)) % 24;
-  const days = Math.floor(ms / (1000 * 60 * 60 * 24));
+  const seconds = Math.floor(duration / 1000) % 60;
+  const minutes = Math.floor(duration / (1000 * 60)) % 60;
+  const hours = Math.floor(duration / (1000 * 60 * 60)) % 24;
+  const days = Math.floor(duration / (1000 * 60 * 60 * 24));
 
   const parts = [];
   if (days > 0) parts.push(`${days}d`);

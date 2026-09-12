@@ -4,7 +4,7 @@
  */
 import 'dotenv/config';
 import { Client, Collection, EmbedBuilder, GatewayIntentBits, PermissionFlagsBits } from 'discord.js';
-import { createEmbed, formatDate, formatProgressBar } from '../src/utils/embeds.js';
+import { createEmbed, formatDate, formatDuration, formatProgressBar } from '../src/utils/embeds.js';
 import { toDate, toEpochMs, toNonNegativeInt, toPgInt } from '../src/utils/database/timestamps.js';
 import {
   getCommandDefaultPermissions,
@@ -17,10 +17,10 @@ import {
 import { loadCommands } from '../src/handlers/loaders/commandLoader.js';
 import loadEvents from '../src/handlers/loaders/events.js';
 import loadInteractions from '../src/handlers/loaders/interactions.js';
-import { initializeDatabase } from '../src/utils/database.js';
+import { initializeDatabase, getXpForLevel as dbGetXpForLevel } from '../src/utils/database.js';
 import { getUserLevelKey, getEconomyKey } from '../src/utils/database/keys.js';
-import { getXpForLevel, MAX_LEVEL } from '../src/services/leveling/leveling.js';
-import { createMockInteraction } from '../src/utils/messageAdapter.js';
+import { getXpForLevel, getLevelFromXp, MAX_LEVEL } from '../src/services/leveling/leveling.js';
+import { createMockInteraction, resolveSlashAccessKey } from '../src/utils/messageAdapter.js';
 
 const failures = [];
 
@@ -90,6 +90,8 @@ async function checkLevelCurve() {
   }
   assert(!maxPlusOneThrew, 'getXpForLevel(MAX_LEVEL + 1) does not throw for rank/xpSystem callers');
   assert(maxPlusOneValue === capXp, 'getXpForLevel above cap returns the cap XP threshold');
+  assert(dbGetXpForLevel(MAX_LEVEL + 1) === capXp, 'database facade XP curve matches service cap');
+  assert(getLevelFromXp('100').level >= 0, 'getLevelFromXp accepts numeric strings from storage');
 
   let negativeThrew = false;
   try {
@@ -144,6 +146,17 @@ async function checkEmbeds() {
   assert(!invalidTimestampThrew, 'invalid Date timestamp does not throw in createEmbed');
   assert(formatDate(new Date('not-a-date')) === 'Unknown', 'formatDate does not emit NaN timestamps');
   assert(formatProgressBar(0, 0).includes('0%'), 'formatProgressBar(0, 0) does not throw');
+  assert(formatDuration(Number.NaN) === '0s', 'formatDuration(NaN) does not emit NaN units');
+
+  let longTitleThrew = false;
+  let clippedTitle;
+  try {
+    clippedTitle = new EmbedBuilder().setTitle('A'.repeat(300)).toJSON().title;
+  } catch {
+    longTitleThrew = true;
+  }
+  assert(!longTitleThrew, 'oversize embed titles are clipped instead of throwing');
+  assert(clippedTitle?.length === 256, 'oversize embed titles are clipped to Discord 256-char limit');
 }
 
 async function checkPermissions() {
@@ -193,6 +206,28 @@ async function checkPermissions() {
     PermissionFlagsBits.ManageGuild,
   );
   assert(result === false, 'checkUserPermissions denies when member is missing');
+  const zeroBitfieldDenied = await checkUserPermissions(
+    {
+      member: mockMember({ permissions: PermissionFlagsBits.SendMessages }),
+      user: { id: '1' },
+      commandName: 'secret',
+      guildId: '2',
+      reply: async () => {},
+    },
+    0n,
+  );
+  assert(zeroBitfieldDenied === false, 'checkUserPermissions treats bitfield 0 as admin-only');
+  const zeroBitfieldAdmin = await checkUserPermissions(
+    {
+      member: mockMember({ admin: true }),
+      user: { id: '1' },
+      commandName: 'secret',
+      guildId: '2',
+      reply: async () => {},
+    },
+    0n,
+  );
+  assert(zeroBitfieldAdmin === true, 'checkUserPermissions allows administrators when bitfield is 0');
   assert(
     botHasPermission({ guild: { members: { me: { id: 'bot' } } }, permissionsFor: () => null }, PermissionFlagsBits.SendMessages) === false,
     'botHasPermission is false when permissionsFor returns null',
@@ -289,6 +324,7 @@ async function checkPrefixAdapter() {
   const channel = mock.options.getChannel('channel');
   assert(channel && typeof channel.then !== 'function', 'prefix getChannel returns a channel, not a Promise');
   assert(channel.id === channelId, 'prefix getChannel resolves mentions from cache');
+  assert(resolveSlashAccessKey({ commandName: 'ban' }) === 'ban', 'resolveSlashAccessKey survives missing options');
 }
 
 async function checkDatabaseFacade() {
@@ -344,6 +380,16 @@ async function checkPostgresRoundTrip() {
     const clampedRow = await db.get(levelKey);
     assert(clampedRow?.xp === 2147483647, 'Postgres user_level xp clamps to INTEGER max');
     assert(clampedRow?.totalXp === 2147483647, 'Postgres user_level totalXp clamps to INTEGER max');
+
+    await db.set(levelKey, {
+      xp: 1,
+      level: 50000,
+      totalXp: 1,
+      lastMessage: 0,
+      rank: 0,
+    });
+    const cappedLevelRow = await db.get(levelKey);
+    assert(cappedLevelRow?.level === 1000, 'Postgres user_level level clamps to MAX_LEVEL');
 
     await db.set(economyKey, { wallet: 50, bank: 25 });
     const economyRow = await db.get(economyKey);

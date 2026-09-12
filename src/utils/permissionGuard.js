@@ -63,7 +63,7 @@ export function memberHasConfiguredModeratorRole(member, guildConfig) {
 
   const modRoleId = normalizeRoleId(guildConfig.modRole);
 
-  return Boolean(modRoleId && member.roles.cache.has(modRoleId));
+  return Boolean(modRoleId && member.roles?.cache?.has(modRoleId));
 }
 
 /**
@@ -82,14 +82,14 @@ export function memberHasModerationCommandAccess(member, guildConfig, requiredPe
     return true;
   }
 
-  if (member.permissions.has(PermissionFlagsBits.Administrator)) {
+  if (member.permissions?.has(PermissionFlagsBits.Administrator)) {
     return true;
   }
 
   if (
     requiredPermissions != null &&
     requiredPermissions !== 0n &&
-    member.permissions.has(requiredPermissions)
+    member.permissions?.has(requiredPermissions)
   ) {
     return true;
   }
@@ -124,7 +124,7 @@ export function memberMeetsCommandPermissions(member, permissionBitfield, option
     return true;
   }
 
-  if (member.permissions.has(PermissionFlagsBits.Administrator)) {
+  if (member.permissions?.has(PermissionFlagsBits.Administrator)) {
     return true;
   }
 
@@ -133,7 +133,7 @@ export function memberMeetsCommandPermissions(member, permissionBitfield, option
     return false;
   }
 
-  return member.permissions.has(permissionBitfield);
+  return Boolean(member.permissions?.has(permissionBitfield));
 }
 
 /**
@@ -211,7 +211,7 @@ export async function enforceDefaultCommandPermissions(interaction, command, con
 
 export function isAdmin(member) {
   if (!member) return false;
-  return member.permissions.has(PermissionFlagsBits.Administrator);
+  return Boolean(member.permissions?.has(PermissionFlagsBits.Administrator));
 }
 
 export function isModerator(member, guildConfig = null) {
@@ -220,13 +220,13 @@ export function isModerator(member, guildConfig = null) {
     return true;
   }
   return (
-    member.permissions.has(PermissionFlagsBits.Administrator) ||
-    member.permissions.has(PermissionFlagsBits.ManageGuild)
+    Boolean(member.permissions?.has(PermissionFlagsBits.Administrator)) ||
+    Boolean(member.permissions?.has(PermissionFlagsBits.ManageGuild))
   );
 }
 
 export function hasPermission(member, permissions) {
-  if (!member) return false;
+  if (!member?.permissions) return false;
   return member.permissions.has(permissions);
 }
 
@@ -255,7 +255,13 @@ export async function checkUserPermissions(
     return false;
   }
 
-  if (!member.permissions.has(requiredPermissions)) {
+  const isOwner = member.guild?.ownerId === member.id;
+  const isAdministrator = Boolean(member.permissions?.has(PermissionFlagsBits.Administrator));
+  const allowed = requiredPermissions === 0n
+    ? isOwner || isAdministrator
+    : Boolean(member.permissions?.has(requiredPermissions));
+
+  if (!allowed) {
     await replyUserError(interaction, {
       type: ErrorTypes.PERMISSION,
       message: errorMessage,
@@ -333,10 +339,10 @@ export async function checkBotPermissions(
 }
 
 function hashUserId(userId) {
-
+  const id = userId == null ? '' : String(userId);
   let hash = 0;
-  for (let i = 0; i < userId.length; i++) {
-    const char = userId.charCodeAt(i);
+  for (let i = 0; i < id.length; i++) {
+    const char = id.charCodeAt(i);
     hash = ((hash << 5) - hash) + char;
     hash = hash & hash;
   }

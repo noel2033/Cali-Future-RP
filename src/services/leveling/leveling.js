@@ -7,8 +7,6 @@ import { TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
 import { getUserLevelKey } from '../../utils/database/keys.js';
 import { toEpochMs, toNonNegativeInt } from '../../utils/database/timestamps.js';
 
-const BASE_XP = 100;
-const XP_MULTIPLIER = 1.5;
 export const MAX_LEVEL = 1000;
 export const MIN_LEVEL = 0;
 
@@ -29,7 +27,8 @@ export function getXpForLevel(level) {
 }
 
 export function getLevelFromXp(xp) {
-  if (!Number.isInteger(xp) || xp < 0) {
+  const amount = toNonNegativeInt(xp, Number.NaN);
+  if (!Number.isFinite(amount)) {
     throw new TitanBotError(
       `Invalid XP: ${xp}`,
       ErrorTypes.VALIDATION,
@@ -37,25 +36,27 @@ export function getLevelFromXp(xp) {
     );
   }
 
+  let remaining = amount;
   let level = 0;
   let xpNeeded = 0;
-  
-  while (xp >= getXpForLevel(level) && level < MAX_LEVEL) {
+
+  while (remaining >= getXpForLevel(level) && level < MAX_LEVEL) {
     xpNeeded = getXpForLevel(level);
-    xp -= xpNeeded;
+    remaining -= xpNeeded;
     level++;
   }
-  
+
   return {
     level: Math.min(level, MAX_LEVEL),
-    currentXp: xp,
+    currentXp: remaining,
     xpNeeded: getXpForLevel(Math.min(level, MAX_LEVEL))
   };
 }
 
 export function calculateTotalXp(level, currentXp = 0) {
-  let total = currentXp;
-  for (let i = 0; i < level; i++) {
+  const safeLevel = Math.min(toNonNegativeInt(level), MAX_LEVEL);
+  let total = toNonNegativeInt(currentXp);
+  for (let i = 0; i < safeLevel; i++) {
     total += getXpForLevel(i);
   }
   return total;
@@ -72,9 +73,9 @@ export async function getLeaderboard(client, guildId, limit = 10) {
       );
     }
 
-    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
-      limit = Math.min(Math.max(limit, 1), 100);
-    }
+    let safeLimit = toNonNegativeInt(limit, 10);
+    if (safeLimit < 1) safeLimit = 10;
+    if (safeLimit > 100) safeLimit = 100;
 
     const guild = client.guilds.cache.get(guildId);
     if (!guild) {
@@ -109,7 +110,7 @@ export async function getLeaderboard(client, guildId, limit = 10) {
       entry.rank = index + 1;
     });
     
-    return leaderboard.slice(0, limit);
+    return leaderboard.slice(0, safeLimit);
     
   } catch (error) {
     logger.error('Error getting leaderboard:', error);
@@ -123,8 +124,9 @@ export async function getLeaderboard(client, guildId, limit = 10) {
 }
 
 export function createLeaderboardEmbed(leaderboard, guild) {
+  const guildName = guild?.name || 'Server';
   const embed = new EmbedBuilder()
-    .setTitle(`🏆 ${guild.name} Leaderboard`)
+    .setTitle(`${guildName} Leaderboard`)
     .setColor('#2ecc71')
     .setTimestamp();
     
@@ -195,6 +197,14 @@ export async function getUserLevelData(client, guildId, userId) {
       );
     }
 
+    if (!client?.db || typeof client.db.get !== 'function') {
+      throw new TitanBotError(
+        'Database client is not available',
+        ErrorTypes.DATABASE,
+        'Could not fetch level data at this time.'
+      );
+    }
+
     const key = getUserLevelKey(guildId, userId);
     const data = await client.db.get(key);
     
@@ -211,7 +221,7 @@ export async function getUserLevelData(client, guildId, userId) {
     return {
       xp: toNonNegativeInt(data.xp),
       level: Math.min(toNonNegativeInt(data.level), MAX_LEVEL),
-      totalXp: toNonNegativeInt(data.totalXp),
+      totalXp: toNonNegativeInt(data.totalXp ?? data.total_xp),
       lastMessage: toEpochMs(data.lastMessage ?? data.last_message, 0),
       rank: toNonNegativeInt(data.rank)
     };
@@ -239,6 +249,14 @@ export async function saveUserLevelData(client, guildId, userId, data) {
       throw new TitanBotError(
         'Invalid user level data',
         ErrorTypes.VALIDATION
+      );
+    }
+
+    if (!client?.db || typeof client.db.set !== 'function') {
+      throw new TitanBotError(
+        'Database client is not available',
+        ErrorTypes.DATABASE,
+        'Could not save level data at this time.'
       );
     }
 
