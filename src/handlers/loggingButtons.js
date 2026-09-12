@@ -21,7 +21,7 @@ import {
 import { getGuildConfig } from '../services/config/guildConfig.js';
 import { successEmbed } from '../utils/embeds.js';
 import { replyUserError, ErrorTypes, handleInteractionError } from '../utils/errorHandler.js';
-import { hasPermission } from '../utils/permissionGuard.js';
+import { hasPermission, botHasPermission } from '../utils/permissionGuard.js';
 import { logger } from '../utils/logger.js';
 import {
   buildLoggingDashboardView,
@@ -346,8 +346,7 @@ async function showChannelModal(interaction, destination) {
       });
     }
 
-    const botPerms = channel.permissionsFor(interaction.guild.members.me);
-    if (!botPerms?.has(['ViewChannel', 'SendMessages', 'EmbedLinks'])) {
+    if (!botHasPermission(channel, ['ViewChannel', 'SendMessages', 'EmbedLinks'])) {
       return modalSubmission.reply({
         content: '❌ I need View Channel, Send Messages, and Embed Links in that channel.',
         flags: MessageFlags.Ephemeral,

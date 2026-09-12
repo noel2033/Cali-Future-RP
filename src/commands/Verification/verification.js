@@ -6,7 +6,7 @@ import { withErrorHandling, createError, ErrorTypes, replyUserError } from '../.
 import { removeVerification, verifyUser } from '../../services/verificationService.js';
 import { logger } from '../../utils/logger.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
-import { hasPermission } from '../../utils/permissionGuard.js';
+import { hasPermission, botHasPermission } from '../../utils/permissionGuard.js';
 import { getWelcomeConfig } from '../../utils/database.js';
 import verificationDashboard from './modules/verification_dashboard.js';
 
@@ -68,7 +68,7 @@ export default {
             const subcommand = interaction.options.getSubcommand();
             const guild = interaction.guild;
 
-            if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+            if (!hasPermission(interaction.member, PermissionFlagsBits.ManageGuild)) {
                 throw createError(
                     'Missing ManageGuild permission for verification admin subcommand',
                     ErrorTypes.PERMISSION,
@@ -119,16 +119,12 @@ async function handleSetup(interaction, guild, client) {
         PermissionFlagsBits.SendMessages,
         PermissionFlagsBits.EmbedLinks
     ];
-    const missingChannelPerms = requiredChannelPermissions.filter(perm => 
-        !verificationChannel.permissionsFor(botMember).has(perm)
-    );
-    
-    if (missingChannelPerms.length > 0) {
+    if (!botHasPermission(verificationChannel, requiredChannelPermissions)) {
         throw createError(
-            `Missing channel permissions: ${missingChannelPerms.join(', ')}`,
+            'Missing channel permissions for verification setup',
             ErrorTypes.PERMISSION,
             'I need **View Channel**, **Send Messages**, and **Embed Links** in the verification channel.',
-            { missingPermissions: missingChannelPerms, channel: verificationChannel.id }
+            { missingPermissions: requiredChannelPermissions, channel: verificationChannel.id }
         );
     }
 

@@ -109,7 +109,7 @@ function normalizeCommandData(command) {
     try {
         jsonData = typeof rawData.toJSON === 'function' ? rawData.toJSON() : rawData;
     } catch {
-        jsonData = rawData;
+        return null;
     }
     if (!jsonData?.name) {
         return null;

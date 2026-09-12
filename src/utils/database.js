@@ -1049,7 +1049,7 @@ export async function getApplications(client, guildId, filters = {}) {
             applications = applications.filter(app => app.userId === userId);
         }
         
-        applications.sort((a, b) => b.createdAt - a.createdAt);
+        applications.sort((a, b) => toEpochMs(b.createdAt, 0) - toEpochMs(a.createdAt, 0));
         
         return applications.slice(offset, offset + limit);
     } catch (error) {

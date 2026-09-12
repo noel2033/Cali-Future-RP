@@ -110,7 +110,7 @@ export async function getBotPanelStatus(client, guild, {
         ? [...(typeof messages.values === 'function' ? messages.values() : messages)]
         : [];
     const recovered = messageList.find(
-        (entry) => entry.author.id === client.user.id && messageHasPanelMarker(entry, marker),
+        (entry) => entry?.author?.id === client.user?.id && messageHasPanelMarker(entry, marker),
     );
 
     if (recovered) {

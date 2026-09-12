@@ -12,7 +12,7 @@ import {
 } from '../../utils/panelStatus.js';
 import { startDashboardSession } from '../../utils/dashboardSession.js';
 import { getReactionRoleKey } from '../../utils/database/keys.js';
-import { hasPermission } from '../../utils/permissionGuard.js';
+import { hasPermission, botHasPermission } from '../../utils/permissionGuard.js';
 
 const DASHBOARD_EPHEMERAL = MessageFlags.Ephemeral;
 const SELECT_OPTION_LABEL_LIMIT = 100;
@@ -21,6 +21,14 @@ const SELECT_OPTION_DESCRIPTION_LIMIT = 100;
 function truncateText(value, maxLength) {
     const text = String(value ?? '');
     return text.length > maxLength ? text.substring(0, maxLength) : text;
+}
+
+function roleHasUnsafePermissions(role) {
+    try {
+        return hasDangerousPermissions(role);
+    } catch {
+        return true;
+    }
 }
 
 export default {
@@ -174,7 +182,7 @@ async function handleSetup(interaction) {
         );
     }
     
-    if (!channel.permissionsFor(interaction.guild.members.me).has(PermissionFlagsBits.SendMessages)) {
+    if (!botHasPermission(channel, PermissionFlagsBits.SendMessages)) {
         throw createError(
             `Bot cannot send messages in ${channel.name}`,
             ErrorTypes.PERMISSION,
@@ -210,7 +218,7 @@ async function handleSetup(interaction) {
                 continue;
             }
             
-            if (hasDangerousPermissions(role)) {
+            if (roleHasUnsafePermissions(role)) {
                 roleValidationErrors.push(`**${role.name}** - This role has dangerous permissions (Administrator, Manage Server, etc.)`);
                 continue;
             }
@@ -788,6 +796,13 @@ async function handleAddRole(selectInteraction, rootInteraction, panelData, guil
     roleCollector.on('collect', async roleInteraction => {
         await roleInteraction.deferUpdate();
         const role = roleInteraction.roles.first();
+        if (!role) {
+            await replyUserError(roleInteraction, {
+                type: ErrorTypes.VALIDATION,
+                message: 'No role was selected.',
+            });
+            return;
+        }
 
         if (panelData.roles.includes(role.id)) {
             await replyUserError(roleInteraction, {
@@ -810,14 +825,22 @@ async function handleAddRole(selectInteraction, rootInteraction, panelData, guil
             });
             return;
         }
-        if (hasDangerousPermissions(role)) {
+        if (roleHasUnsafePermissions(role)) {
             await replyUserError(roleInteraction, {
                 type: ErrorTypes.PERMISSION,
                 message: 'That role has sensitive permissions (Administrator, Manage Server, etc.) and cannot be used.',
             });
             return;
         }
-        if (role.position >= guild.members.me.roles.highest.position) {
+        const botMember = guild.members?.me;
+        if (!botMember) {
+            await replyUserError(roleInteraction, {
+                type: ErrorTypes.PERMISSION,
+                message: 'I could not verify my role hierarchy in this server. Please try again.',
+            });
+            return;
+        }
+        if (role.position >= botMember.roles.highest.position) {
             await replyUserError(roleInteraction, {
                 type: ErrorTypes.PERMISSION,
                 message: "That role is above my highest role in the hierarchy. Move my role above it first.",

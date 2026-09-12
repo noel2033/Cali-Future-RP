@@ -7,7 +7,7 @@ import { getGuildConfig, setGuildConfig } from './config/guildConfig.js';
 import { createError, ErrorTypes } from '../utils/errorHandler.js';
 import { insertVerificationAudit } from '../utils/database.js';
 import { ensureTypedServiceError } from '../utils/serviceErrorBoundary.js';
-import { hasPermission } from '../utils/permissionGuard.js';
+import { hasPermission, botHasPermission } from '../utils/permissionGuard.js';
 
 const verificationCooldowns = new Map();
 const attemptTracker = new Map();
@@ -430,16 +430,12 @@ export async function validateVerificationSetup(guild, verificationConfig) {
             );
         }
 
-        const botPerms = channel.permissionsFor(botMember);
-        const requiredPerms = ['ViewChannel', 'SendMessages', 'EmbedLinks'];
-        const missingPerms = requiredPerms.filter(perm => !botPerms.has(perm));
-
-        if (missingPerms.length > 0) {
+        if (!botHasPermission(channel, ['ViewChannel', 'SendMessages', 'EmbedLinks'])) {
             throw createError(
                 "Bot missing permissions in verification channel",
                 ErrorTypes.PERMISSION,
-                `I'm missing permissions in the verification channel: ${missingPerms.join(', ')}`,
-                { missingPerms, channelId: channel.id }
+                "I'm missing permissions in the verification channel: ViewChannel, SendMessages, EmbedLinks",
+                { missingPerms: ['ViewChannel', 'SendMessages', 'EmbedLinks'], channelId: channel.id }
             );
         }
     }

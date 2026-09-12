@@ -19,13 +19,15 @@ import {
 import { loadCommands, reloadCommand, registerCommands } from '../src/handlers/loaders/commandLoader.js';
 import loadEvents from '../src/handlers/loaders/events.js';
 import loadInteractions from '../src/handlers/loaders/interactions.js';
-import { initializeDatabase, getXpForLevel as dbGetXpForLevel, getLeaderboard as dbGetLeaderboard, getWelcomeConfig, getJoinToCreateConfig, formatChannelName, getApplication, getGuildBirthdays, getEndedGiveaways, getColor as dbGetColor, getMessage } from '../src/utils/database.js';
+import { initializeDatabase, getXpForLevel as dbGetXpForLevel, getLeaderboard as dbGetLeaderboard, getWelcomeConfig, getJoinToCreateConfig, formatChannelName, getApplication, getApplications, getGuildBirthdays, getEndedGiveaways, getColor as dbGetColor, getMessage } from '../src/utils/database.js';
 import { getUserLevelKey, getEconomyKey, getGuildBirthdaysKey, getAFKKey } from '../src/utils/database/keys.js';
 import { getXpForLevel, getLevelFromXp, getUserLevelData, getLeaderboard, MAX_LEVEL } from '../src/services/leveling/leveling.js';
 import { createMockInteraction, resolveSlashAccessKey, resolvePrefixAccessKey, supportsPrefixExecution, executePrefixCommand } from '../src/utils/messageAdapter.js';
 import { mapArgumentsToOptions } from '../src/utils/prefixParser.js';
 import { getPrefixRestriction } from '../src/config/commands/prefixRestrictions.js';
-import { isGiveawayEnded, saveGiveaway } from '../src/utils/giveaways.js';
+import { isGiveawayEnded, saveGiveaway, deleteGiveaway, getGuildGiveaways } from '../src/utils/giveaways.js';
+import { Mutex } from '../src/utils/mutex.js';
+import { getBotPanelStatus } from '../src/utils/panelStatus.js';
 import { hasDangerousPermissions } from '../src/services/reactionRoleService.js';
 import ApplicationService from '../src/services/applicationService.js';
 import { resolveComponentAccessMeta, isComponentAllowed } from '../src/utils/componentAccess.js';
@@ -341,6 +343,17 @@ async function checkPermissions() {
   assert(
     botHasPermission({ guild: { members: { me: { id: 'bot' } } }, permissionsFor: () => null }, PermissionFlagsBits.SendMessages) === false,
     'botHasPermission is false when permissionsFor returns null',
+  );
+  assert(
+    botHasPermission({
+      guild: { members: { me: { id: 'bot' } } },
+      permissionsFor: () => ({
+        has() {
+          throw new Error('invalid bitfield');
+        },
+      }),
+    }, PermissionFlagsBits.SendMessages) === false,
+    'botHasPermission fails closed when permissions.has throws',
   );
   assert(await checkUserPermissions(null, 0n) === false, 'checkUserPermissions denies a missing interaction');
   assert(await checkModerationPermissions(null, {}, 0n) === false, 'checkModerationPermissions denies a missing interaction');
@@ -698,6 +711,79 @@ async function checkRemainingStabilizers() {
   assert(unendThrew, 'saveGiveaway refuses to revive an ended giveaway');
   assert(giveawayStore[1]?.ended === true, 'ended giveaway snapshot stays ended after a stale join write');
   assert(Array.isArray(giveawayStore[1]?.participants) && giveawayStore[1].participants.length === 1, 'stale join does not overwrite ended giveaway participants');
+
+  const deletableStore = {
+    2: { messageId: '2', ended: false, participants: [], prize: 'y' },
+  };
+  const deleteClient = {
+    db: {
+      async get() {
+        return deletableStore;
+      },
+      async set(_key, value) {
+        Object.keys(deletableStore).forEach((key) => {
+          delete deletableStore[key];
+        });
+        Object.assign(deletableStore, value);
+        return true;
+      },
+    },
+  };
+  let joinRecreated = false;
+  const deleteOp = Mutex.runExclusive('giveaway:2', async () => {
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    return deleteGiveaway(deleteClient, 'g1', '2');
+  });
+  const joinOp = (async () => {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return Mutex.runExclusive('giveaway:2', async () => {
+      const list = await getGuildGiveaways(deleteClient, 'g1');
+      if (!list.find((giveaway) => giveaway.messageId === '2')) {
+        return false;
+      }
+      joinRecreated = await saveGiveaway(deleteClient, 'g1', {
+        messageId: '2',
+        ended: false,
+        participants: ['u'],
+        prize: 'y',
+      });
+      return joinRecreated;
+    });
+  })();
+  const [deleted] = await Promise.all([deleteOp, joinOp]);
+  assert(deleted === true, 'deleteGiveaway removes an active giveaway');
+  assert(joinRecreated === false, 'a join waiting on the message lock cannot recreate a deleted giveaway');
+  const afterDelete = await getGuildGiveaways(deleteClient, 'g1');
+  assert(afterDelete.length === 0, 'giveaway map stays empty after locked delete');
+
+  let panelStatusThrew = false;
+  let panelStatus;
+  try {
+    panelStatus = await getBotPanelStatus(
+      { user: { id: 'bot' } },
+      {
+        channels: {
+          async fetch() {
+            return {
+              messages: {
+                async fetch(query) {
+                  if (query && typeof query === 'object' && query.limit) {
+                    return [{ author: null, components: [] }];
+                  }
+                  return null;
+                },
+              },
+            };
+          },
+        },
+      },
+      { channelId: 'c1', messageId: 'm1', buttonCustomId: 'create_ticket' },
+    );
+  } catch {
+    panelStatusThrew = true;
+  }
+  assert(!panelStatusThrew, 'getBotPanelStatus survives messages without authors');
+  assert(panelStatus?.exists === false, 'getBotPanelStatus does not treat authorless messages as live panels');
 }
 
 async function checkDatabaseFacade() {
@@ -709,6 +795,30 @@ async function checkDatabaseFacade() {
 
   const missingApplication = await getApplication(null, 'guild-1', 'app-1');
   assert(missingApplication === null, 'getApplication returns null when client is null');
+
+  const newerCreatedAt = Date.now();
+  const olderCreatedAt = new Date(newerCreatedAt - 5000).toISOString();
+  const applicationRows = {
+    'guild:g1:applications:a': { id: 'a', createdAt: olderCreatedAt, status: 'pending' },
+    'guild:g1:applications:b': { id: 'b', createdAt: newerCreatedAt, status: 'pending' },
+  };
+  const listedApplications = await getApplications(
+    {
+      db: {
+        async list() {
+          return Object.keys(applicationRows);
+        },
+        async get(key) {
+          return applicationRows[key] || {};
+        },
+      },
+    },
+    'g1',
+  );
+  assert(
+    listedApplications[0]?.id === 'b' && listedApplications[1]?.id === 'a',
+    'getApplications sorts ISO and epoch createdAt values newest first',
+  );
 
   const joinConfig = await getJoinToCreateConfig(
     {

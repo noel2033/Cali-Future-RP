@@ -7,6 +7,7 @@ import { InteractionHelper } from '../../utils/interactionHelper.js';
 import { successEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
 import { replyUserError, ErrorTypes } from '../../utils/errorHandler.js';
+import { hasPermission } from '../../utils/permissionGuard.js';
 import {
   disableCategory,
   enableCategory,
@@ -37,7 +38,7 @@ function buildCategoryChoices(client) {
 }
 
 async function ensureManageGuild(interaction) {
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+  if (!hasPermission(interaction.member, PermissionFlagsBits.ManageGuild)) {
     await replyUserError(interaction, { type: ErrorTypes.PERMISSION, message: 'You need the **Manage Server** permission to manage commands.' });
     return false;
   }

@@ -1,5 +1,5 @@
-import { SlashCommandBuilder, PermissionFlagsBits, PermissionsBitField, ChannelType, MessageFlags } from 'discord.js';
-import { errorEmbed, successEmbed } from '../../utils/embeds.js';
+import { SlashCommandBuilder, PermissionFlagsBits, ChannelType, MessageFlags } from 'discord.js';
+import { successEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
 import { TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
 import { saveGiveaway } from '../../utils/giveaways.js';
@@ -123,14 +123,26 @@ export default {
         });
 
         initialGiveawayData.messageId = giveawayMessage.id;
-        const saved = await saveGiveaway(
-            interaction.client,
-            interaction.guildId,
-            initialGiveawayData,
-        );
+        let saved = false;
+        try {
+            saved = await saveGiveaway(
+                interaction.client,
+                interaction.guildId,
+                initialGiveawayData,
+            );
+        } catch (error) {
+            await giveawayMessage.delete().catch(() => {});
+            throw error;
+        }
 
         if (!saved) {
-            logger.warn(`Failed to save giveaway to database: ${giveawayMessage.id}`);
+            await giveawayMessage.delete().catch(() => {});
+            throw new TitanBotError(
+                `Failed to save giveaway to database: ${giveawayMessage.id}`,
+                ErrorTypes.UNKNOWN,
+                'The giveaway could not be saved. Please try again.',
+                { messageId: giveawayMessage.id, guildId: interaction.guildId }
+            );
         }
 
         try {
