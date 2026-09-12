@@ -1008,7 +1008,6 @@ async function checkPluginsAndScripts() {
   assert(redacted.includes('***'), 'restore logs redact the database password');
   assert(!redacted.includes('super-secret'), 'redacted database URL does not include the password');
   assert(
-  assert(
     !redactDatabaseSecrets('pg_restore failed: postgresql://titanbot:super-secret@127.0.0.1/titanbot').includes('super-secret'),
     'restore command errors redact credentials in stderr',
   );
