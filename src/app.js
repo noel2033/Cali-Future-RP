@@ -168,14 +168,14 @@ class TitanBot extends Client {
     });
 
     app.get('/health', (req, res) => {
-      const dbStatus = this.db?.getStatus?.() || { isDegraded: 'unknown' };
+      const dbStatus = this.db?.getStatus?.() || { isDegraded: true, connectionType: 'none' };
       const status = {
         status: 'healthy',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
         database: {
-          connected: dbStatus.connectionType !== 'none',
-          degraded: dbStatus.isDegraded,
+          connected: Boolean(dbStatus.connectionType) && dbStatus.connectionType !== 'none',
+          degraded: Boolean(dbStatus.isDegraded),
           type: dbStatus.connectionType
         }
       };
@@ -270,7 +270,12 @@ class TitanBot extends Client {
       return;
     }
     
-    for (const [guildId, guild] of this.guilds.cache) {
+    const guilds = this.guilds?.cache;
+    if (!guilds || typeof guilds[Symbol.iterator] !== 'function') {
+      return;
+    }
+
+    for (const [guildId, guild] of guilds) {
       try {
         const counters = await getServerCounters(this, guildId);
         if (!Array.isArray(counters)) {

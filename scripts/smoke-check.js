@@ -14,10 +14,10 @@ import {
   isModerator,
   botHasPermission,
 } from '../src/utils/permissionGuard.js';
-import { loadCommands } from '../src/handlers/loaders/commandLoader.js';
+import { loadCommands, reloadCommand } from '../src/handlers/loaders/commandLoader.js';
 import loadEvents from '../src/handlers/loaders/events.js';
 import loadInteractions from '../src/handlers/loaders/interactions.js';
-import { initializeDatabase, getXpForLevel as dbGetXpForLevel, getLeaderboard as dbGetLeaderboard, getWelcomeConfig, getJoinToCreateConfig, formatChannelName } from '../src/utils/database.js';
+import { initializeDatabase, getXpForLevel as dbGetXpForLevel, getLeaderboard as dbGetLeaderboard, getWelcomeConfig, getJoinToCreateConfig, formatChannelName, getApplication } from '../src/utils/database.js';
 import { getUserLevelKey, getEconomyKey } from '../src/utils/database/keys.js';
 import { getXpForLevel, getLevelFromXp, getUserLevelData, getLeaderboard, MAX_LEVEL } from '../src/services/leveling/leveling.js';
 import { createMockInteraction, resolveSlashAccessKey, resolvePrefixAccessKey, supportsPrefixExecution } from '../src/utils/messageAdapter.js';
@@ -324,6 +324,7 @@ async function checkPermissions() {
     botHasPermission({ guild: { members: { me: { id: 'bot' } } }, permissionsFor: () => null }, PermissionFlagsBits.SendMessages) === false,
     'botHasPermission is false when permissionsFor returns null',
   );
+  assert(await checkUserPermissions(null, 0n) === false, 'checkUserPermissions denies a missing interaction');
 }
 
 async function checkCommands() {
@@ -350,6 +351,9 @@ async function checkCommands() {
     }
   }
   assert(overLimit.length === 0, overLimit.length ? `descriptions exceed Discord 100-char limit: ${overLimit.join(', ')}` : 'slash descriptions stay within Discord 100-char limit');
+
+  const missingReload = await reloadCommand({}, 'ban');
+  assert(missingReload.success === false, 'reloadCommand fails closed without a command collection');
 }
 
 async function checkHandlers() {
@@ -434,6 +438,9 @@ async function checkDatabaseFacade() {
 
   const welcome = await getWelcomeConfig(null, 'guild-1');
   assert(welcome && typeof welcome === 'object', 'getWelcomeConfig returns defaults when client is null');
+
+  const missingApplication = await getApplication(null, 'guild-1', 'app-1');
+  assert(missingApplication === null, 'getApplication returns null when client is null');
 
   const joinConfig = await getJoinToCreateConfig(
     {

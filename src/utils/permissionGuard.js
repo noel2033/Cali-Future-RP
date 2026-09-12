@@ -171,6 +171,10 @@ export async function checkModerationPermissions(
  * @returns {Promise<boolean>} true when the member may proceed
  */
 export async function enforceDefaultCommandPermissions(interaction, command, context = {}) {
+  if (!interaction) {
+    return false;
+  }
+
   if (isBotOwner(interaction.user?.id)) {
     return true;
   }
@@ -252,6 +256,10 @@ export async function checkUserPermissions(
   requiredPermissions,
   errorMessage = 'You do not have permission to use this command.'
 ) {
+  if (!interaction) {
+    return false;
+  }
+
   const member = interaction.member;
 
   if (!member) {
@@ -299,7 +307,11 @@ export async function checkBotPermissions(
   requiredPermissions,
   channel = null
 ) {
-  const targetChannel = channel || interaction.channel;
+  if (!interaction && !channel) {
+    return false;
+  }
+
+  const targetChannel = channel || interaction?.channel;
 
   if (!targetChannel || !targetChannel.guild) {
     await replyUserError(interaction, {
@@ -310,7 +322,7 @@ export async function checkBotPermissions(
     return false;
   }
 
-  const botMember = targetChannel.guild.members.me;
+  const botMember = targetChannel.guild.members?.me;
   if (!botMember) {
     await replyUserError(interaction, {
       type: ErrorTypes.UNKNOWN,
@@ -320,7 +332,7 @@ export async function checkBotPermissions(
     return false;
   }
 
-  const permissions = targetChannel.permissionsFor(botMember);
+  const permissions = targetChannel.permissionsFor?.(botMember);
   if (!permissions) {
     await replyUserError(interaction, {
       type: ErrorTypes.PERMISSION,

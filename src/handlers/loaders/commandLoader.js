@@ -177,7 +177,8 @@ function validateCommands(commands) {
             }
         }
 
-        for (const child of node.options || []) {
+        const children = Array.isArray(node.options) ? node.options : [];
+        for (const child of children) {
             walk(child, `${label} ${child.name || 'option'}`);
         }
     };
@@ -248,7 +249,7 @@ export async function registerCommands(client, options = {}) {
 }
 
 export async function reloadCommand(client, commandName) {
-    const command = client.commands.get(commandName);
+    const command = client?.commands?.get(commandName);
     
     if (!command) {
         return { success: false, message: `Command "${commandName}" not found` };

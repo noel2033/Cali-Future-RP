@@ -917,6 +917,11 @@ status: 'pending',
 }
 
 export async function getApplication(client, guildId, applicationId) {
+    if (!client?.db || typeof client.db.get !== 'function') {
+        logger.error('Database client is not available for getApplication.');
+        return null;
+    }
+
     const key = getApplicationKey(guildId, applicationId);
     try {
         await cleanupExpiredApplications(client, guildId);
@@ -929,6 +934,11 @@ export async function getApplication(client, guildId, applicationId) {
 }
 
 export async function updateApplication(client, guildId, applicationId, updates) {
+    if (!client?.db || typeof client.db.set !== 'function') {
+        logger.error('Database client is not available for updateApplication.');
+        throw new Error('Database not available');
+    }
+
     const key = getApplicationKey(guildId, applicationId);
     try {
         const existingApplication = await getApplication(client, guildId, applicationId);
