@@ -180,6 +180,9 @@ function validateCommands(commands) {
 
         const choices = Array.isArray(node.choices) ? node.choices : [];
         for (const choice of choices) {
+            if (!choice || typeof choice !== 'object') {
+                continue;
+            }
             checkLength(`${label} choice name`, choice.name, DISCORD_DESCRIPTION_MAX);
             if (typeof choice.value === 'string') {
                 checkLength(`${label} choice value`, choice.value, DISCORD_CHOICE_VALUE_MAX);
@@ -188,6 +191,9 @@ function validateCommands(commands) {
 
         const children = Array.isArray(node.options) ? node.options : [];
         for (const child of children) {
+            if (!child || typeof child !== 'object') {
+                continue;
+            }
             walk(child, `${label} ${child.name || 'option'}`);
         }
     };
@@ -223,7 +229,7 @@ async function registerGlobalCommands(client, clientId, commands, totalSubcomman
         throw new Error('CLIENT_ID is required for slash command registration');
     }
 
-    if (!client.rest) {
+    if (!client?.rest) {
         throw new Error('Discord REST client is not available for slash command registration');
     }
 

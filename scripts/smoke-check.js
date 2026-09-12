@@ -21,7 +21,7 @@ import loadInteractions from '../src/handlers/loaders/interactions.js';
 import { initializeDatabase, getXpForLevel as dbGetXpForLevel, getLeaderboard as dbGetLeaderboard, getWelcomeConfig, getJoinToCreateConfig, formatChannelName, getApplication, getGuildBirthdays, getEndedGiveaways, getColor as dbGetColor, getMessage } from '../src/utils/database.js';
 import { getUserLevelKey, getEconomyKey, getGuildBirthdaysKey, getAFKKey } from '../src/utils/database/keys.js';
 import { getXpForLevel, getLevelFromXp, getUserLevelData, getLeaderboard, MAX_LEVEL } from '../src/services/leveling/leveling.js';
-import { createMockInteraction, resolveSlashAccessKey, resolvePrefixAccessKey, supportsPrefixExecution } from '../src/utils/messageAdapter.js';
+import { createMockInteraction, resolveSlashAccessKey, resolvePrefixAccessKey, supportsPrefixExecution, executePrefixCommand } from '../src/utils/messageAdapter.js';
 
 const failures = [];
 
@@ -263,8 +263,12 @@ async function checkPermissions() {
     'default_member_permissions "0" is admin-only, not unrestricted',
   );
   assert(
-    getCommandDefaultPermissions({ default_member_permissions: 'not-a-bitfield' }) === 0n,
-    'invalid default_member_permissions fails closed as admin-only',
+    getCommandDefaultPermissions({
+      toJSON() {
+        throw new Error('toJSON failed');
+      },
+    }) === 0n,
+    'getCommandDefaultPermissions fails closed when toJSON throws',
   );
 
   const regular = mockMember({ permissions: PermissionFlagsBits.SendMessages });
@@ -379,7 +383,15 @@ async function checkCommands() {
         data: {
           name: 'okcmd',
           toJSON() {
-            return { name: 'okcmd', description: 'ok', choices: { not: 'array' } };
+            return { name: 'okcmd', description: 'ok', choices: [null], options: [null] };
+          },
+        },
+      }],
+      ['objchoices', {
+        data: {
+          name: 'objchoices',
+          toJSON() {
+            return { name: 'objchoices', description: 'ok', choices: { not: 'array' } };
           },
         },
       }],
@@ -405,8 +417,9 @@ async function checkCommands() {
   } catch {
     registerThrew = true;
   }
-  assert(!registerThrew, 'registerCommands does not throw on non-array choices or toJSON failures');
+  assert(!registerThrew, 'registerCommands does not throw on null choices/options or toJSON failures');
   assert(Array.isArray(registeredBody) && registeredBody.some((cmd) => cmd.name === 'okcmd'), 'registerCommands still registers valid commands');
+  assert(registeredBody.some((cmd) => cmd.name === 'objchoices'), 'registerCommands treats non-array choices as empty');
   assert(!registeredBody.some((cmd) => cmd.name === 'badjson'), 'registerCommands skips commands whose toJSON throws');
 }
 
@@ -492,6 +505,13 @@ async function checkPrefixAdapter() {
   }
   assert(!missingArgsThrew, 'resolvePrefixAccessKey survives missing args');
   assert(supportsPrefixExecution(null) === false, 'supportsPrefixExecution is false for missing commands');
+  let missingPrefixCommandThrew = false;
+  try {
+    await executePrefixCommand(null, fakeMessage, []);
+  } catch {
+    missingPrefixCommandThrew = true;
+  }
+  assert(!missingPrefixCommandThrew, 'executePrefixCommand fails closed without a command');
 }
 
 async function checkDatabaseFacade() {

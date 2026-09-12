@@ -11,7 +11,14 @@ import { isBotOwner, getBotMessage } from '../config/bot.js';
  * @returns {bigint | null}
  */
 export function getCommandDefaultPermissions(commandData) {
-  const json = commandData?.toJSON?.() ?? commandData;
+  let json;
+  try {
+    json = commandData?.toJSON?.() ?? commandData;
+  } catch {
+    logger.warn('[PERMISSION] Invalid command payload; treating as admin-only');
+    return 0n;
+  }
+
   const value = json?.default_member_permissions;
 
   if (value == null) {
@@ -71,7 +78,7 @@ export function memberHasConfiguredModeratorRole(member, guildConfig) {
 
   const modRoleId = normalizeRoleId(guildConfig.modRole);
 
-  return Boolean(modRoleId && member.roles?.cache?.has(modRoleId));
+  return Boolean(modRoleId && member.roles?.cache?.has?.(modRoleId));
 }
 
 /**

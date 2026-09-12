@@ -11,7 +11,11 @@ import { enforceDefaultCommandPermissions } from './permissionGuard.js';
 export { buildPrefixUsage };
 
 function getCommandJson(commandData) {
-  return commandData?.toJSON ? commandData.toJSON() : commandData;
+  try {
+    return commandData?.toJSON ? commandData.toJSON() : commandData;
+  } catch {
+    return commandData;
+  }
 }
 
 function asSnowflake(value, mentionPattern) {
@@ -209,11 +213,16 @@ export function supportsPrefixExecution(command) {
 }
 
 export async function executePrefixCommand(command, message, args, client, prefixOverride = null, guildConfig = null) {
-  const mockInteraction = createMockInteraction(message, command.data, args);
-  const coordinator = mockInteraction._responseCoordinator;
-  const prefix = prefixOverride || getCommandPrefix();
+  if (!command || !message) {
+    return;
+  }
 
+  let mockInteraction;
   try {
+    mockInteraction = createMockInteraction(message, command.data, args);
+    const coordinator = mockInteraction._responseCoordinator;
+    const prefix = prefixOverride || getCommandPrefix();
+
     const permissionAllowed = await enforceDefaultCommandPermissions(mockInteraction, command, {
       source: 'messageAdapter.executePrefixCommand',
       guildConfig,
@@ -234,6 +243,9 @@ export async function executePrefixCommand(command, message, args, client, prefi
       await command.execute(mockInteraction, guildConfig, client);
     }
   } catch (error) {
+    if (!mockInteraction) {
+      return;
+    }
     await handleInteractionError(mockInteraction, error, {
       type: 'prefix_command',
       command: command.data?.name,
