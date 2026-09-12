@@ -234,7 +234,9 @@ export function botHasPermission(channel, permissions) {
   if (!channel || !channel.guild) return false;
   const botMember = channel.guild.members.me;
   if (!botMember) return false;
-  return channel.permissionsFor(botMember).has(permissions);
+  const channelPermissions = channel.permissionsFor(botMember);
+  if (!channelPermissions) return false;
+  return channelPermissions.has(permissions);
 }
 
 export async function checkUserPermissions(
@@ -296,6 +298,15 @@ export async function checkBotPermissions(
   }
 
   const permissions = targetChannel.permissionsFor(botMember);
+  if (!permissions) {
+    await replyUserError(interaction, {
+      type: ErrorTypes.PERMISSION,
+      message: `I could not read my permissions in ${targetChannel}.`,
+      context: { source: 'permissionGuard.checkBotPermissions', subtype: 'bot_permission' }
+    });
+    return false;
+  }
+
   const missingPerms = [];
 
   const permArray = Array.isArray(requiredPermissions) ? requiredPermissions : [requiredPermissions];

@@ -14,6 +14,20 @@ function getCommandJson(commandData) {
   return commandData?.toJSON ? commandData.toJSON() : commandData;
 }
 
+function asSnowflake(value, mentionPattern) {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value === 'object' && value.id != null) {
+    return String(value.id);
+  }
+
+  const text = String(value);
+  const mentionMatch = text.match(mentionPattern);
+  return mentionMatch ? mentionMatch[1] : text;
+}
+
 export function resolveSlashAccessKey(interaction) {
   const subcommandGroup = interaction.options.getSubcommandGroup(false);
   const subcommand = interaction.options.getSubcommand(false);
@@ -73,11 +87,8 @@ export function createMockInteraction(message, commandData, args) {
       get: (name) => options.get(name),
       getString: (name) => options.getString(name),
       getUser: (name) => {
-        const userId = options.getUser(name);
-        if (!userId || !message.guild) return null;
-
-        const mentionMatch = userId.match(/<@!?(\d+)>/);
-        const id = mentionMatch ? mentionMatch[1] : userId;
+        const id = asSnowflake(options.getUser(name), /<@!?(\d+)>/);
+        if (!id || !message.guild) return null;
 
         const cachedMember = message.guild.members.cache.get(id);
         if (cachedMember) {
@@ -92,31 +103,22 @@ export function createMockInteraction(message, commandData, args) {
         };
       },
       getMember: (name) => {
-        const userId = options.getUser(name);
-        if (!userId || !message.guild) return null;
-
-        const mentionMatch = userId.match(/<@!?(\d+)>/);
-        const id = mentionMatch ? mentionMatch[1] : userId;
+        const id = asSnowflake(options.getUser(name), /<@!?(\d+)>/);
+        if (!id || !message.guild) return null;
 
         return message.guild.members.cache.get(id) ?? null;
       },
       getChannel: (name) => {
-        const channelId = options.getString(name);
-        if (!channelId || !message.guild) return null;
+        const id = asSnowflake(options.getString(name) ?? options.getChannel?.(name), /<#(\d+)>/);
+        if (!id || !message.guild) return null;
 
-        const mentionMatch = channelId.match(/<#(\d+)>/);
-        const id = mentionMatch ? mentionMatch[1] : channelId;
-
-        return message.guild.channels.fetch(id).catch(() => null);
+        return message.guild.channels.cache.get(id) ?? null;
       },
       getRole: (name) => {
-        const roleId = options.getString(name);
-        if (!roleId || !message.guild) return null;
+        const id = asSnowflake(options.getString(name) ?? options.getRole?.(name), /<@&(\d+)>/);
+        if (!id || !message.guild) return null;
 
-        const mentionMatch = roleId.match(/<@&(\d+)>/);
-        const id = mentionMatch ? mentionMatch[1] : roleId;
-
-        return message.guild.roles.fetch(id).catch(() => null);
+        return message.guild.roles.cache.get(id) ?? null;
       },
       getInteger: (name) => options.getInteger(name),
       getBoolean: (name) => options.getBoolean(name),

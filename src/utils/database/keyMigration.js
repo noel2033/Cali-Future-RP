@@ -1,7 +1,7 @@
 import { pgConfig } from '../../config/database/postgres.js';
 import { canonicalizeKey } from './keys.js';
 import { parseKey } from './keyParser.js';
-import { toDate, toNonNegativeInt } from './timestamps.js';
+import { toDate, toPgInt } from './timestamps.js';
 
 /**
  * Marker version for the key-canonicalization migration. Bump this only if a new
@@ -100,11 +100,11 @@ async function migrateUserLevelFromTemp(client, legacyKey, value) {
         [
             parsed.guildId,
             parsed.userId,
-            toNonNegativeInt(payload?.xp),
-            toNonNegativeInt(payload?.level),
-            toNonNegativeInt(payload?.totalXp ?? payload?.total_xp),
+            toPgInt(payload?.xp),
+            toPgInt(payload?.level),
+            toPgInt(payload?.totalXp ?? payload?.total_xp),
             toDate(lastMessageValue),
-            toNonNegativeInt(payload?.rank),
+            toPgInt(payload?.rank),
         ],
     );
 }

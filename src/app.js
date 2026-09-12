@@ -50,6 +50,9 @@ class TitanBot extends Client {
   async start() {
     try {
       startupLog('Starting TitanBot...');
+      if (!this.config.bot.token) {
+        throw new Error('Missing Discord bot token');
+      }
       await new Promise(resolve => setTimeout(resolve, 1000));
       
       startupLog('Initializing database...');

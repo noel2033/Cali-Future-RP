@@ -489,13 +489,14 @@ export async function getUserLevelData(client, guildId, userId) {
             };
         }
         
+        const level = Math.min(toNonNegativeInt(data.level), 1000);
         const levelData = {
             xp: toNonNegativeInt(data.xp),
-            level: toNonNegativeInt(data.level),
+            level,
             totalXp: toNonNegativeInt(data.totalXp ?? data.total_xp),
             lastMessage: toEpochMs(data.lastMessage ?? data.last_message, 0),
             rank: toNonNegativeInt(data.rank),
-            xpToNextLevel: getXpForLevel((toNonNegativeInt(data.level)) + 1)
+            xpToNextLevel: getXpForLevel(level + 1)
         };
         
         return levelData;
@@ -515,10 +516,15 @@ export async function getUserLevelData(client, guildId, userId) {
 export async function saveUserLevelData(client, guildId, userId, data) {
     const key = getUserLevelKey(guildId, userId);
     try {
+        if (!data || typeof data !== 'object') {
+            logger.error(`Invalid level data for user ${userId} in guild ${guildId}`);
+            return false;
+        }
+
         const levelData = {
             ...data,
             xp: toNonNegativeInt(data.xp),
-            level: toNonNegativeInt(data.level),
+            level: Math.min(toNonNegativeInt(data.level), 1000),
             totalXp: toNonNegativeInt(data.totalXp ?? data.total_xp),
             lastMessage: toEpochMs(data.lastMessage ?? data.last_message, 0),
             rank: toNonNegativeInt(data.rank),

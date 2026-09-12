@@ -4,24 +4,28 @@ import { EmbedBuilder } from 'discord.js';
 import { logger } from '../../utils/logger.js';
 import { getGuildConfig, setGuildConfig } from '../config/guildConfig.js';
 import { TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
-import { addXp } from './xpSystem.js';
 import { getUserLevelKey } from '../../utils/database/keys.js';
 import { toEpochMs, toNonNegativeInt } from '../../utils/database/timestamps.js';
 
 const BASE_XP = 100;
 const XP_MULTIPLIER = 1.5;
-const MAX_LEVEL = 1000;
-const MIN_LEVEL = 0;
+export const MAX_LEVEL = 1000;
+export const MIN_LEVEL = 0;
+
+function xpCurve(level) {
+  return 5 * Math.pow(level, 2) + 50 * level + 50;
+}
 
 export function getXpForLevel(level) {
-  if (!Number.isInteger(level) || level < 0 || level > MAX_LEVEL) {
+  if (!Number.isInteger(level) || level < MIN_LEVEL) {
     throw new TitanBotError(
-      `Invalid level: ${level}. Must be between ${MIN_LEVEL} and ${MAX_LEVEL}`,
+      `Invalid level: ${level}. Must be an integer >= ${MIN_LEVEL}`,
       ErrorTypes.VALIDATION,
       'The level must be a valid number.'
     );
   }
-  return 5 * Math.pow(level, 2) + 50 * level + 50;
+  // Rank/leaderboard/xpSystem pass level+1; do not throw at the cap.
+  return xpCurve(Math.min(level, MAX_LEVEL));
 }
 
 export function getLevelFromXp(xp) {

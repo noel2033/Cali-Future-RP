@@ -42,6 +42,12 @@ export function toNonNegativeInt(value, fallback = 0) {
     return n;
 }
 
+const INT4_MAX = 2147483647;
+
+export function toPgInt(value, fallback = 0) {
+    return Math.min(toNonNegativeInt(value, fallback), INT4_MAX);
+}
+
 export function toEpochMs(value, fallback = 0) {
     if (value == null || value === '') {
         return fallback;

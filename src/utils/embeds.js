@@ -348,12 +348,19 @@ export function formatUser(user) {
   return `${user} (${user.tag} | ${user.id})`;
 }
 
+function toUnixSeconds(date) {
+  const time = date instanceof Date ? date.getTime() : Date.parse(date);
+  return Number.isFinite(time) ? Math.floor(time / 1000) : null;
+}
+
 export function formatDate(date) {
-  return `<t:${Math.floor(date.getTime() / 1000)}:F>`;
+  const seconds = toUnixSeconds(date);
+  return seconds == null ? 'Unknown' : `<t:${seconds}:F>`;
 }
 
 export function formatRelativeTime(date) {
-  return `<t:${Math.floor(date.getTime() / 1000)}:R>`;
+  const seconds = toUnixSeconds(date);
+  return seconds == null ? 'Unknown' : `<t:${seconds}:R>`;
 }
 
 export function formatCodeBlock(content, language = '') {
@@ -412,8 +419,15 @@ export function formatDuration(ms) {
 }
 
 export function formatProgressBar(current, max, size = 10) {
-  const progress = Math.min(Math.max(0, current / max), 1);
-  const filled = Math.round(size * progress);
-  const empty = size - filled;
+  const barSize = Number.isInteger(size) && size > 0 ? size : 10;
+  const safeCurrent = Number(current);
+  const safeMax = Number(max);
+  if (!Number.isFinite(safeCurrent) || !Number.isFinite(safeMax) || safeMax <= 0) {
+    return `[${'░'.repeat(barSize)}] 0%`;
+  }
+
+  const progress = Math.min(Math.max(0, safeCurrent / safeMax), 1);
+  const filled = Math.round(barSize * progress);
+  const empty = barSize - filled;
   return `[${'█'.repeat(filled)}${'░'.repeat(empty)}] ${Math.round(progress * 100)}%`;
 }

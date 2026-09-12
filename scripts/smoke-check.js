@@ -4,21 +4,23 @@
  */
 import 'dotenv/config';
 import { Client, Collection, EmbedBuilder, GatewayIntentBits, PermissionFlagsBits } from 'discord.js';
-import { createEmbed } from '../src/utils/embeds.js';
-import { toDate, toEpochMs, toNonNegativeInt } from '../src/utils/database/timestamps.js';
+import { createEmbed, formatDate, formatProgressBar } from '../src/utils/embeds.js';
+import { toDate, toEpochMs, toNonNegativeInt, toPgInt } from '../src/utils/database/timestamps.js';
 import {
   getCommandDefaultPermissions,
   memberMeetsCommandPermissions,
   memberHasModerationCommandAccess,
   checkUserPermissions,
   isModerator,
+  botHasPermission,
 } from '../src/utils/permissionGuard.js';
 import { loadCommands } from '../src/handlers/loaders/commandLoader.js';
 import loadEvents from '../src/handlers/loaders/events.js';
 import loadInteractions from '../src/handlers/loaders/interactions.js';
 import { initializeDatabase } from '../src/utils/database.js';
 import { getUserLevelKey, getEconomyKey } from '../src/utils/database/keys.js';
-import { getXpForLevel } from '../src/services/leveling/leveling.js';
+import { getXpForLevel, MAX_LEVEL } from '../src/services/leveling/leveling.js';
+import { createMockInteraction } from '../src/utils/messageAdapter.js';
 
 const failures = [];
 
@@ -72,6 +74,30 @@ async function checkTimestamps() {
   assert(toNonNegativeInt(2.9) === 2, 'toNonNegativeInt floors fractional XP/level values');
   assert(toNonNegativeInt('15') === 15, 'toNonNegativeInt parses numeric strings');
   assert(getXpForLevel(toNonNegativeInt(2.9) + 1) > 0, 'floored levels are valid for getXpForLevel');
+  assert(toPgInt(3e15) === 2147483647, 'toPgInt clamps values that would overflow PostgreSQL INTEGER');
+}
+
+async function checkLevelCurve() {
+  assert(getXpForLevel(0) === 50, 'getXpForLevel(0) matches XP curve');
+  assert(getXpForLevel(1) === 105, 'getXpForLevel(1) matches XP curve');
+  const capXp = getXpForLevel(MAX_LEVEL);
+  let maxPlusOneThrew = false;
+  let maxPlusOneValue;
+  try {
+    maxPlusOneValue = getXpForLevel(MAX_LEVEL + 1);
+  } catch {
+    maxPlusOneThrew = true;
+  }
+  assert(!maxPlusOneThrew, 'getXpForLevel(MAX_LEVEL + 1) does not throw for rank/xpSystem callers');
+  assert(maxPlusOneValue === capXp, 'getXpForLevel above cap returns the cap XP threshold');
+
+  let negativeThrew = false;
+  try {
+    getXpForLevel(-1);
+  } catch {
+    negativeThrew = true;
+  }
+  assert(negativeThrew, 'getXpForLevel still rejects negative levels');
 }
 
 async function checkEmbeds() {
@@ -116,6 +142,8 @@ async function checkEmbeds() {
     invalidTimestampThrew = true;
   }
   assert(!invalidTimestampThrew, 'invalid Date timestamp does not throw in createEmbed');
+  assert(formatDate(new Date('not-a-date')) === 'Unknown', 'formatDate does not emit NaN timestamps');
+  assert(formatProgressBar(0, 0).includes('0%'), 'formatProgressBar(0, 0) does not throw');
 }
 
 async function checkPermissions() {
@@ -165,6 +193,10 @@ async function checkPermissions() {
     PermissionFlagsBits.ManageGuild,
   );
   assert(result === false, 'checkUserPermissions denies when member is missing');
+  assert(
+    botHasPermission({ guild: { members: { me: { id: 'bot' } } }, permissionsFor: () => null }, PermissionFlagsBits.SendMessages) === false,
+    'botHasPermission is false when permissionsFor returns null',
+  );
 }
 
 async function checkCommands() {
@@ -200,14 +232,63 @@ async function checkHandlers() {
   client.selectMenus = new Collection();
   client.modals = new Collection();
 
-  await loadEvents(client);
-  await loadInteractions(client);
+  try {
+    await loadEvents(client);
+    await loadInteractions(client);
 
-  assert(client.eventNames().includes('interactionCreate'), 'interactionCreate event registered');
-  assert(client.eventNames().includes('messageCreate'), 'messageCreate event registered');
-  assert(client.buttons.size > 0, `loaded ${client.buttons.size} button handlers`);
-  assert(client.selectMenus.size > 0, `loaded ${client.selectMenus.size} select menu handlers`);
-  assert(client.modals.size > 0, `loaded ${client.modals.size} modal handlers`);
+    assert(client.eventNames().includes('interactionCreate'), 'interactionCreate event registered');
+    assert(client.eventNames().includes('messageCreate'), 'messageCreate event registered');
+    assert(client.buttons.size > 0, `loaded ${client.buttons.size} button handlers`);
+    assert(client.selectMenus.size > 0, `loaded ${client.selectMenus.size} select menu handlers`);
+    assert(client.modals.size > 0, `loaded ${client.modals.size} modal handlers`);
+  } finally {
+    await client.destroy();
+  }
+}
+
+async function checkPrefixAdapter() {
+  const channelId = '99';
+  const fakeMessage = {
+    author: { id: '1' },
+    member: { id: '1', permissions: { has: () => true } },
+    channel: { id: 'c' },
+    guild: {
+      id: 'g',
+      members: { cache: { get: () => null } },
+      channels: {
+        cache: { get: (id) => (id === channelId ? { id: channelId } : undefined) },
+        fetch: async () => {
+          throw new Error('prefix getChannel should not fetch');
+        },
+      },
+      roles: {
+        cache: { get: () => null },
+        fetch: async () => {
+          throw new Error('prefix getRole should not fetch');
+        },
+      },
+    },
+    id: 'm',
+    createdTimestamp: Date.now(),
+    createdAt: new Date(),
+    client: {},
+  };
+  const commandData = {
+    name: 'say',
+    toJSON() {
+      return {
+        name: 'say',
+        options: [
+          { name: 'channel', description: 'channel', type: 7, required: false },
+        ],
+      };
+    },
+  };
+
+  const mock = createMockInteraction(fakeMessage, commandData, [channelId]);
+  const channel = mock.options.getChannel('channel');
+  assert(channel && typeof channel.then !== 'function', 'prefix getChannel returns a channel, not a Promise');
+  assert(channel.id === channelId, 'prefix getChannel resolves mentions from cache');
 }
 
 async function checkDatabaseFacade() {
@@ -253,6 +334,17 @@ async function checkPostgresRoundTrip() {
     const numericRow = await db.get(levelKey);
     assert(numericRow?.lastMessage === 1_753_670_199_000, 'Postgres user_level lastMessage round-trips numeric epoch');
 
+    await db.set(levelKey, {
+      xp: 3e15,
+      level: 2,
+      totalXp: 3e15,
+      lastMessage: 0,
+      rank: 1,
+    });
+    const clampedRow = await db.get(levelKey);
+    assert(clampedRow?.xp === 2147483647, 'Postgres user_level xp clamps to INTEGER max');
+    assert(clampedRow?.totalXp === 2147483647, 'Postgres user_level totalXp clamps to INTEGER max');
+
     await db.set(economyKey, { wallet: 50, bank: 25 });
     const economyRow = await db.get(economyKey);
     assert(economyRow?.wallet === 50 && economyRow?.bank === 25, 'Postgres economy wallet/bank persist');
@@ -266,11 +358,13 @@ async function checkPostgresRoundTrip() {
 }
 
 await checkTimestamps();
+await checkLevelCurve();
 await checkEmbeds();
 await checkPermissions();
 await checkDatabaseFacade();
 await checkCommands();
 await checkHandlers();
+await checkPrefixAdapter();
 await checkPostgresRoundTrip();
 
 if (failures.length > 0) {

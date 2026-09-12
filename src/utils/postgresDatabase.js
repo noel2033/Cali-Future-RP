@@ -14,7 +14,7 @@ import {
     getStructuredListPlan,
 } from './database/keyParser.js';
 import { runKeyMigration } from './database/keyMigration.js';
-import { toDate, toEpochMs, toNonNegativeInt } from './database/timestamps.js';
+import { toDate, toEpochMs, toPgInt } from './database/timestamps.js';
 import {
     tableStatements,
     indexStatements,
@@ -644,11 +644,11 @@ class PostgreSQLDatabase {
                     // Map snake_case columns to the camelCase shape consumers expect
                     const levelRow = userLevelResult.rows[0];
                     return {
-                        xp: toNonNegativeInt(levelRow.xp),
-                        level: toNonNegativeInt(levelRow.level),
-                        totalXp: toNonNegativeInt(levelRow.total_xp),
+                        xp: toPgInt(levelRow.xp),
+                        level: toPgInt(levelRow.level),
+                        totalXp: toPgInt(levelRow.total_xp),
                         lastMessage: toEpochMs(levelRow.last_message, 0),
-                        rank: toNonNegativeInt(levelRow.rank),
+                        rank: toPgInt(levelRow.rank),
                     };
                 }
                 
@@ -825,11 +825,11 @@ class PostgreSQLDatabase {
                         [
                             parsedKey.guildId,
                             parsedKey.userId,
-                            toNonNegativeInt(value.xp),
-                            toNonNegativeInt(value.level),
-                            toNonNegativeInt(value.totalXp ?? value.total_xp),
+                            toPgInt(value?.xp),
+                            toPgInt(value?.level),
+                            toPgInt(value?.totalXp ?? value?.total_xp),
                             normalizedLastMessage,
-                            toNonNegativeInt(value.rank),
+                            toPgInt(value?.rank),
                         ]
                     );
                     return true;
