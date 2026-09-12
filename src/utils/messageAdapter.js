@@ -18,6 +18,28 @@ function getCommandJson(commandData) {
   }
 }
 
+function emptyPrefixOptions(args) {
+  return {
+    _positional: args,
+    get: (name) => args[0] || null,
+    getString: (name) => args[0] || null,
+    getUser: () => null,
+    getInteger: () => parseInt(args[0], 10) || null,
+    getBoolean: () => args[0] === 'true',
+    getSubcommand: () => null,
+    getSubcommandGroup: () => null,
+    validateRequired: () => ({ valid: true, missing: [] }),
+  };
+}
+
+function safeMapArgumentsToOptions(args, commandData) {
+  try {
+    return mapArgumentsToOptions(args, commandData);
+  } catch {
+    return emptyPrefixOptions(args);
+  }
+}
+
 function asSnowflake(value, mentionPattern) {
   if (value == null) {
     return null;
@@ -60,7 +82,7 @@ export function resolvePrefixAccessKey(commandData, args) {
     return null;
   }
 
-  const options = mapArgumentsToOptions(Array.isArray(args) ? args : [], commandData);
+  const options = safeMapArgumentsToOptions(Array.isArray(args) ? args : [], commandData);
   const subcommand = options.getSubcommand();
   const subcommandGroup = options.getSubcommandGroup();
   const commandName = getCommandJson(commandData)?.name;
@@ -82,7 +104,7 @@ export function resolvePrefixAccessKey(commandData, args) {
 
 export function createMockInteraction(message, commandData, args) {
   const argv = Array.isArray(args) ? args : [];
-  const options = mapArgumentsToOptions(argv, commandData || {});
+  const options = safeMapArgumentsToOptions(argv, commandData || {});
   const commandStartTime = Date.now();
 
   const mockInteraction = {

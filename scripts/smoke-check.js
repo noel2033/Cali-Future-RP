@@ -504,6 +504,28 @@ async function checkPrefixAdapter() {
     missingArgsThrew = true;
   }
   assert(!missingArgsThrew, 'resolvePrefixAccessKey survives missing args');
+  const throwingCommandData = {
+    name: 'x',
+    toJSON() {
+      throw new Error('toJSON failed');
+    },
+  };
+  let throwingAccessKey;
+  let throwingAccessThrew = false;
+  try {
+    throwingAccessKey = resolvePrefixAccessKey(throwingCommandData, []);
+  } catch {
+    throwingAccessThrew = true;
+  }
+  assert(!throwingAccessThrew, 'resolvePrefixAccessKey survives toJSON throw');
+  assert(throwingAccessKey === 'x', 'resolvePrefixAccessKey falls back to command name when toJSON throws');
+  let throwingMockThrew = false;
+  try {
+    createMockInteraction(fakeMessage, throwingCommandData, ['arg']);
+  } catch {
+    throwingMockThrew = true;
+  }
+  assert(!throwingMockThrew, 'createMockInteraction survives toJSON throw');
   assert(supportsPrefixExecution(null) === false, 'supportsPrefixExecution is false for missing commands');
   let missingPrefixCommandThrew = false;
   try {

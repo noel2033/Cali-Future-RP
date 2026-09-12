@@ -94,7 +94,14 @@ export async function loadCommands(client) {
             uniqueCommandNames.add(primaryCommandName);
             client.commands.set(primaryCommandName, command);
 
-            const commandJson = typeof command.data.toJSON === 'function' ? command.data.toJSON() : command.data;
+            let commandJson = command.data;
+            try {
+                if (typeof command.data.toJSON === 'function') {
+                    commandJson = command.data.toJSON();
+                }
+            } catch (error) {
+                logger.warn(`Loaded command "${primaryCommandName}" but data.toJSON() failed:`, error);
+            }
             const subcommands = getSubcommandInfo(commandJson);
             
             logger.debug(`Loaded command: ${primaryCommandName} from ${normalizedPath} (category: ${category})`);
