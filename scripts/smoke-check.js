@@ -2,7 +2,8 @@
  * Offline sanity check for boot-critical modules.
  * Does not log into Discord or require a live bot token.
  */
-import { Collection, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
+import 'dotenv/config';
+import { Client, Collection, EmbedBuilder, GatewayIntentBits, PermissionFlagsBits } from 'discord.js';
 import { createEmbed } from '../src/utils/embeds.js';
 import { toDate, toEpochMs } from '../src/utils/database/timestamps.js';
 import {
@@ -12,7 +13,10 @@ import {
   checkUserPermissions,
 } from '../src/utils/permissionGuard.js';
 import { loadCommands } from '../src/handlers/loaders/commandLoader.js';
+import loadEvents from '../src/handlers/loaders/events.js';
+import loadInteractions from '../src/handlers/loaders/interactions.js';
 import { initializeDatabase } from '../src/utils/database.js';
+import { getUserLevelKey, getEconomyKey } from '../src/utils/database/keys.js';
 import { getXpForLevel } from '../src/services/leveling/leveling.js';
 
 const failures = [];
@@ -156,9 +160,76 @@ async function checkCommands() {
   assert(overLimit.length === 0, overLimit.length ? `descriptions exceed Discord 100-char limit: ${overLimit.join(', ')}` : 'slash descriptions stay within Discord 100-char limit');
 }
 
+async function checkHandlers() {
+  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  client.events = new Collection();
+  client.buttons = new Collection();
+  client.selectMenus = new Collection();
+  client.modals = new Collection();
+
+  await loadEvents(client);
+  await loadInteractions(client);
+
+  assert(client.eventNames().includes('interactionCreate'), 'interactionCreate event registered');
+  assert(client.eventNames().includes('messageCreate'), 'messageCreate event registered');
+  assert(client.buttons.size > 0, `loaded ${client.buttons.size} button handlers`);
+  assert(client.selectMenus.size > 0, `loaded ${client.selectMenus.size} select menu handlers`);
+  assert(client.modals.size > 0, `loaded ${client.modals.size} modal handlers`);
+}
+
 async function checkDatabaseFacade() {
   assert(typeof initializeDatabase === 'function', 'database wrapper exports initializeDatabase');
   assert(getXpForLevel(1) === 105, 'leveling XP curve helper is importable');
+}
+
+async function checkPostgresRoundTrip() {
+  if (!process.env.POSTGRES_URL && !process.env.POSTGRES_HOST) {
+    console.log('SKIP  Postgres round-trip (no POSTGRES_URL/POSTGRES_HOST)');
+    return;
+  }
+
+  const { db } = await initializeDatabase();
+  const status = db.getStatus();
+  if (status.isDegraded) {
+    console.log(`SKIP  Postgres round-trip (degraded: ${status.degradedReason || status.connectionType})`);
+    return;
+  }
+
+  const guildId = 'smoke-guild';
+  const userId = 'smoke-user';
+  const iso = '2026-07-28T13:16:39.000Z';
+  const levelKey = getUserLevelKey(guildId, userId);
+  const economyKey = getEconomyKey(guildId, userId);
+
+  try {
+    await db.set(levelKey, {
+      xp: 25,
+      level: 2,
+      totalXp: 180,
+      lastMessage: iso,
+      rank: 1,
+    });
+    const levelRow = await db.get(levelKey);
+    assert(levelRow?.totalXp === 180, 'Postgres user_level stores camelCase totalXp');
+    assert(levelRow?.lastMessage === Date.parse(iso), 'Postgres user_level lastMessage round-trips ISO to epoch ms');
+
+    await db.set(levelKey, {
+      ...levelRow,
+      lastMessage: 1_753_670_199_000,
+    });
+    const numericRow = await db.get(levelKey);
+    assert(numericRow?.lastMessage === 1_753_670_199_000, 'Postgres user_level lastMessage round-trips numeric epoch');
+
+    await db.set(economyKey, { wallet: 50, bank: 25 });
+    const economyRow = await db.get(economyKey);
+    assert(economyRow?.wallet === 50 && economyRow?.bank === 25, 'Postgres economy wallet/bank persist');
+  } finally {
+    await db.delete(levelKey).catch(() => {});
+    await db.delete(economyKey).catch(() => {});
+    if (db.db?.pool) {
+      await db.db.pool.end().catch(() => {});
+    }
+  }
 }
 
 await checkTimestamps();
@@ -166,6 +237,8 @@ await checkEmbeds();
 await checkPermissions();
 await checkDatabaseFacade();
 await checkCommands();
+await checkHandlers();
+await checkPostgresRoundTrip();
 
 if (failures.length > 0) {
   console.error(`\nSmoke check failed: ${failures.length} assertion(s)`);
