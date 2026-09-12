@@ -147,6 +147,10 @@ export function createGiveawayEmbed(giveaway, status, winners = []) {
     }
 }
 
+export function getGiveawayParticipants(giveaway) {
+    return Array.isArray(giveaway?.participants) ? giveaway.participants : [];
+}
+
 export function isGiveawayEnded(giveaway) {
     if (!giveaway) return true;
     if (giveaway.ended || giveaway.isEnded) return true;
@@ -162,7 +166,7 @@ export function pickWinners(entrants, count) {
     } catch (error) {
         logger.error('Error picking winners:', error);
         
-        if (!entrants || entrants.length === 0) return [];
+        if (!Array.isArray(entrants) || entrants.length === 0) return [];
         const requested = Math.min(count, entrants.length);
         const shuffled = [...entrants];
         for (let i = shuffled.length - 1; i > 0; i--) {

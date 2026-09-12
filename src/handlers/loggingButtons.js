@@ -335,7 +335,13 @@ async function showChannelModal(interaction, destination) {
       filter: (i) => i.user.id === interaction.user.id && i.customId === modalCustomId,
     });
 
-    const channelId = modalSubmission.fields.getField('log_channel').values[0];
+    const channelId = modalSubmission.fields.getField('log_channel')?.values?.[0];
+    if (!channelId) {
+      return modalSubmission.reply({
+        content: '❌ Please select a channel.',
+        flags: MessageFlags.Ephemeral,
+      });
+    }
     const channel = interaction.guild.channels.cache.get(channelId)
       ?? await interaction.guild.channels.fetch(channelId).catch(() => null);
 

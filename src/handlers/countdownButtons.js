@@ -128,9 +128,7 @@ async function countdownButtonHandler(interaction, client, args) {
                     countdownData.endTime = Date.now() + countdownData.remainingTime;
                     startCountdown(countdownId, countdownData, activeCountdowns);
 
-                    const currentEmbed = countdownData.message.embeds[0];
                     await countdownData.message.edit({
-                        embeds: [currentEmbed],
                         components: [createControlButtons(countdownId, false)],
                     });
 
@@ -143,9 +141,7 @@ async function countdownButtonHandler(interaction, client, args) {
                     countdownData.isPaused = true;
                     countdownData.remainingTime = countdownData.endTime - Date.now();
 
-                    const currentEmbed = countdownData.message.embeds[0];
                     await countdownData.message.edit({
-                        embeds: [currentEmbed],
                         components: [createControlButtons(countdownId, true)],
                     });
 

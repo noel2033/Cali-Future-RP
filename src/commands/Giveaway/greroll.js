@@ -2,7 +2,7 @@ import { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } from 'discord.
 import { errorEmbed, successEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
 import { TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
-import { getGuildGiveaways, saveGiveaway } from '../../utils/giveaways.js';
+import { getGuildGiveaways, saveGiveaway, getGiveawayParticipants } from '../../utils/giveaways.js';
 import { 
     selectWinners,
     createGiveawayEmbed, 
@@ -83,7 +83,7 @@ export default {
             );
         }
 
-        const participants = giveaway.participants || [];
+        const participants = getGiveawayParticipants(giveaway);
 
         if (participants.length < giveaway.winnerCount) {
             throw new TitanBotError(

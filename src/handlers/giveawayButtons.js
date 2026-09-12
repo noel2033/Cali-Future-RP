@@ -5,7 +5,8 @@ import { TitanBotError, ErrorTypes, handleInteractionError, replyUserError } fro
 import { 
     getGuildGiveaways, 
     saveGiveaway, 
-    isGiveawayEnded 
+    isGiveawayEnded,
+    getGiveawayParticipants,
 } from '../utils/giveaways.js';
 import { Mutex } from '../utils/mutex.js';
 import { hasPermission } from '../utils/permissionGuard.js';
@@ -50,7 +51,7 @@ export const giveawayJoinHandler = {
                     return replyUserError(interaction, { type: ErrorTypes.UNKNOWN, message: 'This giveaway has already ended.' });
                 }
 
-                const participants = giveaway.participants || [];
+                const participants = getGiveawayParticipants(giveaway);
                 const userId = interaction.user.id;
 
                 if (participants.includes(userId)) {
@@ -134,7 +135,7 @@ export const giveawayEndHandler = {
                 );
             }
 
-            const participants = giveaway.participants || [];
+            const participants = getGiveawayParticipants(giveaway);
             const winners = selectWinners(participants, giveaway.winnerCount);
 
             giveaway.ended = true;
@@ -253,7 +254,7 @@ export const giveawayRerollHandler = {
                 );
             }
 
-            const participants = giveaway.participants || [];
+            const participants = getGiveawayParticipants(giveaway);
             
             if (participants.length === 0) {
                 throw new TitanBotError(

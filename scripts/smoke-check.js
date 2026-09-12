@@ -25,7 +25,7 @@ import { getXpForLevel, getLevelFromXp, getUserLevelData, getLeaderboard, MAX_LE
 import { createMockInteraction, resolveSlashAccessKey, resolvePrefixAccessKey, supportsPrefixExecution, executePrefixCommand } from '../src/utils/messageAdapter.js';
 import { mapArgumentsToOptions } from '../src/utils/prefixParser.js';
 import { getPrefixRestriction } from '../src/config/commands/prefixRestrictions.js';
-import { isGiveawayEnded, saveGiveaway, deleteGiveaway, getGuildGiveaways } from '../src/utils/giveaways.js';
+import { isGiveawayEnded, saveGiveaway, deleteGiveaway, getGuildGiveaways, getGiveawayParticipants, pickWinners } from '../src/utils/giveaways.js';
 import { Mutex } from '../src/utils/mutex.js';
 import { getBotPanelStatus } from '../src/utils/panelStatus.js';
 import { hasDangerousPermissions } from '../src/services/reactionRoleService.js';
@@ -592,6 +592,9 @@ async function checkRemainingStabilizers() {
   assert(isGiveawayEnded({ endsAt: pastIso }) === true, 'isGiveawayEnded parses past ISO end times as ended');
   assert(isGiveawayEnded({ ended: true, endsAt: futureIso }) === true, 'isGiveawayEnded honors the ended flag');
   assert(isGiveawayEnded({ endsAt: 'not-a-date' }) === true, 'isGiveawayEnded fails closed on invalid end times');
+  assert(getGiveawayParticipants({ participants: { length: 2 } }).length === 0, 'getGiveawayParticipants treats non-array participants as empty');
+  assert(Array.isArray(pickWinners({ length: 2 }, 1)), 'pickWinners does not throw when entrants is not an array');
+  assert(pickWinners({ length: 2 }, 1).length === 0, 'pickWinners returns no winners for non-array entrants');
 
   let prefixRestrictionThrew = false;
   let prefixRestriction;
