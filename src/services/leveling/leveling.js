@@ -10,6 +10,27 @@ import { toEpochMs, toNonNegativeInt } from '../../utils/database/timestamps.js'
 export const MAX_LEVEL = 1000;
 export const MIN_LEVEL = 0;
 
+const DEFAULT_LEVELING_CONFIG = {
+  enabled: true,
+  xpPerMessage: { min: 15, max: 25 },
+  xpCooldown: 20,
+  levelUpMessage: '{user} has leveled up to level {level}!',
+  levelUpChannel: null,
+  ignoredChannels: [],
+  ignoredRoles: [],
+  blacklistedUsers: [],
+  roleRewards: {},
+  announceLevelUp: true,
+  xpMultiplier: 1
+};
+
+function mergeLevelingConfig(config) {
+  if (!config || typeof config !== 'object') {
+    return { ...DEFAULT_LEVELING_CONFIG };
+  }
+  return { ...DEFAULT_LEVELING_CONFIG, ...config };
+}
+
 function xpCurve(level) {
   return 5 * Math.pow(level, 2) + 50 * level + 50;
 }
@@ -157,34 +178,10 @@ export function createLeaderboardEmbed(leaderboard, guild) {
 export async function getLevelingConfig(client, guildId) {
   try {
     const guildConfig = await getGuildConfig(client, guildId);
-    return guildConfig.leveling || {
-      enabled: true,
-      xpPerMessage: { min: 15, max: 25 },
-      xpCooldown: 20,
-      levelUpMessage: '{user} has leveled up to level {level}!',
-      levelUpChannel: null,
-      ignoredChannels: [],
-      ignoredRoles: [],
-      blacklistedUsers: [],
-      roleRewards: {},
-      announceLevelUp: true,
-      xpMultiplier: 1
-    };
+    return mergeLevelingConfig(guildConfig?.leveling);
   } catch (error) {
     logger.error(`Error getting leveling config for guild ${guildId}:`, error);
-    return {
-      enabled: true,
-      xpPerMessage: { min: 15, max: 25 },
-      xpCooldown: 20,
-      levelUpMessage: '{user} has leveled up to level {level}!',
-      levelUpChannel: null,
-      ignoredChannels: [],
-      ignoredRoles: [],
-      blacklistedUsers: [],
-      roleRewards: {},
-      announceLevelUp: true,
-      xpMultiplier: 1
-    };
+    return mergeLevelingConfig();
   }
 }
 
@@ -292,23 +289,33 @@ export async function saveLevelingConfig(client, guildId, config) {
 
     const guildConfig = await getGuildConfig(client, guildId);
 
-    if (config.xpCooldown && (config.xpCooldown < 0 || config.xpCooldown > 3600)) {
-      throw new TitanBotError(
-        'XP cooldown must be between 0 and 3600 seconds',
-        ErrorTypes.VALIDATION,
-        'Cooldown must be between 0 and 3600 seconds.'
-      );
+    if (config.xpCooldown != null) {
+      const cooldown = Number(config.xpCooldown);
+      if (!Number.isFinite(cooldown) || cooldown < 0 || cooldown > 3600) {
+        throw new TitanBotError(
+          'XP cooldown must be between 0 and 3600 seconds',
+          ErrorTypes.VALIDATION,
+          'Cooldown must be between 0 and 3600 seconds.'
+        );
+      }
     }
 
-    if (config.xpRange && (config.xpRange.min < 1 || config.xpRange.max < 1 || config.xpRange.min > config.xpRange.max)) {
-      throw new TitanBotError(
-        'Invalid XP range configuration',
-        ErrorTypes.VALIDATION,
-        'Minimum XP must be less than maximum XP, and both must be positive.'
-      );
+    if (config.xpRange) {
+      const min = Number(config.xpRange.min);
+      const max = Number(config.xpRange.max);
+      if (!Number.isFinite(min) || !Number.isFinite(max) || min < 1 || max < 1 || min > max) {
+        throw new TitanBotError(
+          'Invalid XP range configuration',
+          ErrorTypes.VALIDATION,
+          'Minimum XP must be less than maximum XP, and both must be positive.'
+        );
+      }
     }
 
-    guildConfig.leveling = config;
+    guildConfig.leveling = mergeLevelingConfig({
+      ...(guildConfig.leveling && typeof guildConfig.leveling === 'object' ? guildConfig.leveling : {}),
+      ...config,
+    });
     await setGuildConfig(client, guildId, guildConfig);
     
     logger.info(`Leveling config updated for guild ${guildId}`);
@@ -469,6 +476,11 @@ export async function deleteUserLevelData(client, guildId, userId) {
         'Guild ID and User ID are required',
         ErrorTypes.VALIDATION
       );
+    }
+
+    if (!client?.db || typeof client.db.delete !== 'function') {
+      logger.warn(`Database client is not available; skipped delete of level data for user ${userId}`);
+      return;
     }
 
     const key = getUserLevelKey(guildId, userId);

@@ -66,6 +66,10 @@ EmbedBuilder.prototype.setTitle = function setSanitizedTitle(title) {
 };
 
 EmbedBuilder.prototype.setAuthor = function setSanitizedAuthor(author) {
+  if (author == null) {
+    return this;
+  }
+
   if (typeof author === 'string') {
     const name = nonEmptySanitizedText(author);
     if (!name) {
@@ -113,6 +117,10 @@ EmbedBuilder.prototype.setDescription = function setSanitizedDescription(descrip
 };
 
 EmbedBuilder.prototype.setFooter = function setSanitizedFooter(footer) {
+  if (footer == null) {
+    return this;
+  }
+
   if (typeof footer === 'string') {
     const text = nonEmptySanitizedText(footer);
     if (!text) {

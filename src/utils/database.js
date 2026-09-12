@@ -573,12 +573,15 @@ export async function getLeaderboard(client, guildId, limit = 10) {
                 if (!data) return null;
                 
                 const unwrapped = unwrapReplitData(data);
+                if (!unwrapped || typeof unwrapped !== 'object') return null;
+
+                const level = Math.min(toNonNegativeInt(unwrapped.level), 1000);
                 return {
                     userId,
-                    xp: unwrapped.xp || 0,
-                    level: unwrapped.level || 0,
-                    totalXp: unwrapped.totalXp || 0,
-rank: 0
+                    xp: toNonNegativeInt(unwrapped.xp),
+                    level,
+                    totalXp: toNonNegativeInt(unwrapped.totalXp ?? unwrapped.total_xp),
+                    rank: 0
                 };
             } catch (error) {
                 logger.error(`Error processing leaderboard key ${key}:`, error);
@@ -595,7 +598,11 @@ rank: 0
             rank: index + 1
         }));
         
-        return userData.slice(0, limit);
+        let safeLimit = toNonNegativeInt(limit, 10);
+        if (safeLimit < 1) safeLimit = 10;
+        if (safeLimit > 100) safeLimit = 100;
+
+        return userData.slice(0, safeLimit);
     } catch (error) {
         logger.error(`Error getting leaderboard for guild ${guildId}:`, error);
         return [];

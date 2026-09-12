@@ -48,6 +48,10 @@ export function resolveSlashAccessKey(interaction) {
 }
 
 export function resolvePrefixAccessKey(commandData, args) {
+  if (!commandData) {
+    return null;
+  }
+
   const options = mapArgumentsToOptions(args, commandData);
   const subcommand = options.getSubcommand();
   const subcommandGroup = options.getSubcommandGroup();
@@ -180,6 +184,10 @@ export function createMockInteraction(message, commandData, args) {
 }
 
 export function supportsPrefixExecution(command) {
+  if (!command) {
+    return false;
+  }
+
   if (command.prefixOnly === false || command.slashOnly === true) {
     return false;
   }

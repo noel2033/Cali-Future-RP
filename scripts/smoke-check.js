@@ -20,7 +20,7 @@ import loadInteractions from '../src/handlers/loaders/interactions.js';
 import { initializeDatabase, getXpForLevel as dbGetXpForLevel } from '../src/utils/database.js';
 import { getUserLevelKey, getEconomyKey } from '../src/utils/database/keys.js';
 import { getXpForLevel, getLevelFromXp, MAX_LEVEL } from '../src/services/leveling/leveling.js';
-import { createMockInteraction, resolveSlashAccessKey } from '../src/utils/messageAdapter.js';
+import { createMockInteraction, resolveSlashAccessKey, resolvePrefixAccessKey, supportsPrefixExecution } from '../src/utils/messageAdapter.js';
 
 const failures = [];
 
@@ -157,6 +157,14 @@ async function checkEmbeds() {
   }
   assert(!longTitleThrew, 'oversize embed titles are clipped instead of throwing');
   assert(clippedTitle?.length === 256, 'oversize embed titles are clipped to Discord 256-char limit');
+
+  let nullFooterThrew = false;
+  try {
+    new EmbedBuilder().setFooter(null);
+  } catch {
+    nullFooterThrew = true;
+  }
+  assert(!nullFooterThrew, 'setFooter(null) does not throw');
 }
 
 async function checkPermissions() {
@@ -325,6 +333,8 @@ async function checkPrefixAdapter() {
   assert(channel && typeof channel.then !== 'function', 'prefix getChannel returns a channel, not a Promise');
   assert(channel.id === channelId, 'prefix getChannel resolves mentions from cache');
   assert(resolveSlashAccessKey({ commandName: 'ban' }) === 'ban', 'resolveSlashAccessKey survives missing options');
+  assert(resolvePrefixAccessKey(null, []) === null, 'resolvePrefixAccessKey returns null without command data');
+  assert(supportsPrefixExecution(null) === false, 'supportsPrefixExecution is false for missing commands');
 }
 
 async function checkDatabaseFacade() {
