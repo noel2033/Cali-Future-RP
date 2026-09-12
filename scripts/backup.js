@@ -138,7 +138,7 @@ async function run() {
 run().catch((error) => {
   logger.error('Backup command failed', {
     event: 'backup.failed',
-    error: error.message
+    error: redactDatabaseSecrets(error.message)
   });
   process.exit(1);
 });

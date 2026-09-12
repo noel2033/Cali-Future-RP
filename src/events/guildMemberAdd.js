@@ -81,7 +81,8 @@ export default {
             }
         }
         
-        if (welcomeConfig?.roleIds && welcomeConfig.roleIds.length > 0) {
+        if (Array.isArray(welcomeConfig?.roleIds) && welcomeConfig.roleIds.length > 0) {
+            try {
             const delay = welcomeConfig.autoRoleDelay || 0;
             const singleRoleId = welcomeConfig.roleIds[0];
             
@@ -100,6 +101,9 @@ export default {
                 if (role) {
                     await assignRoleSafely(member, role);
                 }
+            }
+            } catch (error) {
+                logger.warn('Failed to assign auto-role:', error);
             }
         }
         

@@ -11,6 +11,16 @@ function parseBoolean(value, defaultValue = false) {
     return ['true', '1', 'yes'].includes(String(value).toLowerCase());
 }
 
+function parseNodesPayload(parsed) {
+    if (Array.isArray(parsed)) {
+        return parsed;
+    }
+    if (Array.isArray(parsed?.nodes)) {
+        return parsed.nodes;
+    }
+    return null;
+}
+
 function sanitizeNodes(nodes) {
     if (!Array.isArray(nodes)) {
         return null;
@@ -38,20 +48,10 @@ function parseNodesFromEnv() {
 
     try {
         const parsed = JSON.parse(raw);
-        return sanitizeNodes(parsed);
+        return sanitizeNodes(parseNodesPayload(parsed));
     } catch {
         return null;
     }
-}
-
-function parseNodesPayload(parsed) {
-    if (Array.isArray(parsed)) {
-        return parsed;
-    }
-    if (Array.isArray(parsed?.nodes)) {
-        return parsed.nodes;
-    }
-    return null;
 }
 
 function loadNodesFromFile() {

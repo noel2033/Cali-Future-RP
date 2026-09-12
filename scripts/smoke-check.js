@@ -39,6 +39,7 @@ import { getLavalinkNodes } from '../src/config/music/lavalink.js';
 import { ModerationService } from '../src/services/moderation/moderationService.js';
 import ConfigService from '../src/services/config/configService.js';
 import { validateLogChannel } from '../src/utils/ticket/ticketLogging.js';
+import { logEvent, EVENT_TYPES as LOG_EVENT_TYPES } from '../src/services/loggingService.js';
 import { ErrorTypes } from '../src/utils/errorHandler.js';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -972,6 +973,24 @@ async function checkPluginsAndScripts() {
     }
   }
 
+  const previousWrappedNodes = process.env.LAVALINK_NODES;
+  process.env.LAVALINK_NODES = JSON.stringify({
+    nodes: [{ host: 'wrapped.example', port: 443, password: 'secret' }],
+  });
+  try {
+    const wrappedNodes = getLavalinkNodes();
+    assert(
+      wrappedNodes.length === 1 && wrappedNodes[0].host === 'wrapped.example',
+      'LAVALINK_NODES object.nodes payloads are accepted',
+    );
+  } finally {
+    if (previousWrappedNodes === undefined) {
+      delete process.env.LAVALINK_NODES;
+    } else {
+      process.env.LAVALINK_NODES = previousWrappedNodes;
+    }
+  }
+
   assert(resolveConfiguredPostgresUrl({}) === '', 'resolveConfiguredPostgresUrl is empty without env');
   assert(
     resolveConfiguredPostgresUrl({ DATABASE_URL: 'postgresql://example/db' }) === 'postgresql://example/db',
@@ -989,9 +1008,29 @@ async function checkPluginsAndScripts() {
   assert(redacted.includes('***'), 'restore logs redact the database password');
   assert(!redacted.includes('super-secret'), 'redacted database URL does not include the password');
   assert(
+  assert(
     !redactDatabaseSecrets('pg_restore failed: postgresql://titanbot:super-secret@127.0.0.1/titanbot').includes('super-secret'),
     'restore command errors redact credentials in stderr',
   );
+  assert(
+    !redactDatabaseSecrets('password authentication failed for postgresql://titanbot:super-secret@127.0.0.1/titanbot').includes('super-secret'),
+    'script failure logs redact credentials in error.message',
+  );
+
+  let logMissingGuildsThrew = false;
+  let logMissingGuildsResult;
+  try {
+    logMissingGuildsResult = await logEvent({
+      client: {},
+      guildId: 'g1',
+      eventType: LOG_EVENT_TYPES.MEMBER_JOIN,
+      data: { title: 'join', lines: [] },
+    });
+  } catch {
+    logMissingGuildsThrew = true;
+  }
+  assert(!logMissingGuildsThrew, 'logEvent does not throw when client.guilds is missing');
+  assert(logMissingGuildsResult == null, 'logEvent returns null when client.guilds is missing');
 
   assert(
     ConfigService.verifyPermission(mockMember({ permissions: PermissionFlagsBits.ManageGuild })) === true,
@@ -1026,7 +1065,16 @@ async function checkPluginsAndScripts() {
       guild: {
         ownerId: '999',
         name: 'smoke',
-        client: {},
+        client: {
+          guilds: {
+            cache: {
+              get() {
+                return null;
+              },
+            },
+            fetch: async () => null,
+          },
+        },
         members: {
           fetch: async () => null,
           ban: async () => {
@@ -1052,7 +1100,16 @@ async function checkPluginsAndScripts() {
       guild: {
         ownerId: '999',
         name: 'smoke',
-        client: {},
+        client: {
+          guilds: {
+            cache: {
+              get() {
+                return null;
+              },
+            },
+            fetch: async () => null,
+          },
+        },
         members: {
           fetch: async () => null,
           ban: async () => {

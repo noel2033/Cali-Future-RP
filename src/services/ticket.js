@@ -101,7 +101,7 @@ export async function createTicket(guild, member, categoryId, reason = 'No reaso
       guild.channels.cache.get(categoryId) :
       guild.channels.cache.find(c => 
         c.type === ChannelType.GuildCategory && 
-        c.name.toLowerCase().includes('tickets')
+        c.name?.toLowerCase().includes('tickets')
       );
     
     if (!category && !categoryId) {
@@ -594,8 +594,7 @@ export async function reopenTicket(channel, reopener) {
     const closeStatusMessage = messages.find(m =>
       m.embeds.length > 0 &&
       m.embeds[0].title === 'Ticket Closed' &&
-      m.components.length > 0 &&
-      m.components[0].components.some(c => c.customId === 'ticket_reopen')
+      m.components?.[0]?.components?.some(c => c.customId === 'ticket_reopen')
     );
 
     if (closeStatusMessage) {

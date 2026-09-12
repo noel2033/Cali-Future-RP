@@ -10,6 +10,10 @@ function getTargetLabel(target) {
   return target.user?.tag ?? target.displayName ?? 'this user';
 }
 
+function getActorTag(actor) {
+  return actor?.user?.tag ?? actor?.tag ?? actor?.id ?? 'unknown';
+}
+
 function getHighestRole(member) {
   return member?.roles?.highest ?? null;
 }
@@ -181,8 +185,8 @@ export class ModerationService {
         guild,
         event: {
           action: 'Member Banned',
-          target: `${user.tag} (${user.id})`,
-          executor: `${moderator.user.tag} (${moderator.id})`,
+          target: `${getActorTag(user)} (${user.id})`,
+          executor: `${getActorTag(moderator)} (${moderator.id})`,
           reason,
           metadata: {
             userId: user.id,
@@ -193,11 +197,11 @@ export class ModerationService {
         }
       });
 
-      logger.info(`User banned: ${user.tag} by ${moderator.user.tag} in ${guild.name}`);
+      logger.info(`User banned: ${getActorTag(user)} by ${getActorTag(moderator)} in ${guild.name}`);
       
       return {
         caseId,
-        user: user.tag,
+        user: getActorTag(user),
         reason
       };
     } catch (error) {
@@ -240,8 +244,8 @@ export class ModerationService {
         guild,
         event: {
           action: 'Member Kicked',
-          target: `${member.user.tag} (${member.id})`,
-          executor: `${moderator.user.tag} (${moderator.id})`,
+          target: `${getActorTag(member)} (${member.id})`,
+          executor: `${getActorTag(moderator)} (${moderator.id})`,
           reason,
           metadata: {
             userId: member.id,
@@ -250,11 +254,11 @@ export class ModerationService {
         }
       });
 
-      logger.info(`User kicked: ${member.user.tag} by ${moderator.user.tag} in ${guild.name}`);
+      logger.info(`User kicked: ${getActorTag(member)} by ${getActorTag(moderator)} in ${guild.name}`);
       
       return {
         caseId,
-        user: member.user.tag,
+        user: getActorTag(member),
         reason
       };
     } catch (error) {
@@ -299,8 +303,8 @@ export class ModerationService {
         guild,
         event: {
           action: 'Member Timed Out',
-          target: `${member.user.tag} (${member.id})`,
-          executor: `${moderator.user.tag} (${moderator.id})`,
+          target: `${getActorTag(member)} (${member.id})`,
+          executor: `${getActorTag(moderator)} (${moderator.id})`,
           reason,
           duration: `${durationMinutes} minutes`,
           metadata: {
@@ -311,11 +315,11 @@ export class ModerationService {
         }
       });
 
-      logger.info(`User timed out: ${member.user.tag} by ${moderator.user.tag} in ${guild.name}`);
+      logger.info(`User timed out: ${getActorTag(member)} by ${getActorTag(moderator)} in ${guild.name}`);
       
       return {
         caseId,
-        user: member.user.tag,
+        user: getActorTag(member),
         duration: durationMinutes,
         reason
       };
@@ -356,7 +360,7 @@ export class ModerationService {
         throw new TitanBotError(
           'User not timed out',
           ErrorTypes.VALIDATION,
-          `${member.user.tag} is not currently timed out`
+          `${getActorTag(member)} is not currently timed out`
         );
       }
 
@@ -367,8 +371,8 @@ export class ModerationService {
         guild,
         event: {
           action: 'Member Untimeouted',
-          target: `${member.user.tag} (${member.id})`,
-          executor: `${moderator.user.tag} (${moderator.id})`,
+          target: `${getActorTag(member)} (${member.id})`,
+          executor: `${getActorTag(moderator)} (${moderator.id})`,
           reason,
           metadata: {
             userId: member.id,
@@ -377,10 +381,10 @@ export class ModerationService {
         }
       });
 
-      logger.info(`Timeout removed: ${member.user.tag} by ${moderator.user.tag} in ${guild.name}`);
+      logger.info(`Timeout removed: ${getActorTag(member)} by ${getActorTag(moderator)} in ${guild.name}`);
       
       return {
-        user: member.user.tag
+        user: getActorTag(member)
       };
     } catch (error) {
       logger.error('Error removing timeout:', error);
@@ -410,7 +414,7 @@ export class ModerationService {
         throw new TitanBotError(
           'User not banned',
           ErrorTypes.VALIDATION,
-          `${user.tag} is not currently banned from this server`
+          `${getActorTag(user)} is not currently banned from this server`
         );
       }
 
@@ -421,8 +425,8 @@ export class ModerationService {
         guild,
         event: {
           action: 'Member Unbanned',
-          target: `${user.tag} (${user.id})`,
-          executor: `${moderator.user.tag} (${moderator.id})`,
+          target: `${getActorTag(user)} (${user.id})`,
+          executor: `${getActorTag(moderator)} (${moderator.id})`,
           reason,
           metadata: {
             userId: user.id,
@@ -431,11 +435,11 @@ export class ModerationService {
         }
       });
 
-      logger.info(`User unbanned: ${user.tag} by ${moderator.user.tag} in ${guild.name}`);
+      logger.info(`User unbanned: ${getActorTag(user)} by ${getActorTag(moderator)} in ${guild.name}`);
       
       return {
         caseId,
-        user: user.tag,
+        user: getActorTag(user),
         reason
       };
     } catch (error) {

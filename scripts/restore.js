@@ -132,7 +132,7 @@ async function run() {
 run().catch((error) => {
   logger.error('Restore command failed', {
     event: 'restore.failed',
-    error: error.message
+    error: redactDatabaseSecrets(error.message)
   });
   process.exit(1);
 });

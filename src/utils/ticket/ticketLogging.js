@@ -12,7 +12,7 @@ import {
 
 export async function logTicketEvent({ client, guildId, event }) {
   try {
-    const guild = client.guilds.cache.get(guildId) || await client.guilds.fetch(guildId).catch(() => null);
+    const guild = client?.guilds?.cache?.get(guildId) || await client?.guilds?.fetch?.(guildId).catch(() => null);
     if (!guild) {
       logger.warn(`logTicketEvent invoked without valid guild: ${guildId}`);
       return;

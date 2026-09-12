@@ -206,8 +206,8 @@ export async function logEvent({
   channelId: overrideChannelId = null,
 }) {
   try {
-    const guild = client.guilds.cache.get(guildId) ||
-      await client.guilds.fetch(guildId).catch(() => null);
+    const guild = client?.guilds?.cache?.get(guildId) ||
+      await client?.guilds?.fetch?.(guildId).catch(() => null);
 
     if (!guild) {
       logger.warn(`logEvent: Guild not found: ${guildId}`);
@@ -217,10 +217,10 @@ export async function logEvent({
     const config = await getGuildConfig(client, guildId);
     const ignore = getIgnoreList(config);
 
-    if (data?.userId && ignore.users?.includes(data.userId)) {
+    if (data?.userId && Array.isArray(ignore.users) && ignore.users.includes(data.userId)) {
       return null;
     }
-    if (data?.channelId && ignore.channels?.includes(data.channelId)) {
+    if (data?.channelId && Array.isArray(ignore.channels) && ignore.channels.includes(data.channelId)) {
       return null;
     }
 

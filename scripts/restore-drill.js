@@ -201,7 +201,7 @@ async function run() {
 run().catch((error) => {
   logger.error('Restore drill failed', {
     event: 'restore_drill.failed',
-    error: error.message
+    error: redactDatabaseSecrets(error.message)
   });
   process.exit(1);
 });
